@@ -1,0 +1,13 @@
+[Unit]
+Description=mprov master server service
+Wants=network-online.target
+After=network-online.target
+After=time-sync.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sysconfig/mprov
+ExecStart=/usr/bin/mprov -m ${MPROV_MASTER_OPTIONS}
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,66 @@
+# This file is the environment script for used with the 'master' and 'worker'
+# services.  The .service script will source this file at start up and adjust
+# the commandline options accordingly.  For a full list of all the options to
+# mprov, run "mprov --help"  Most options include what mode they apply to.
+
+################ MASTER SERVER MODE OPTIONS #############################
+
+# this should resolve on all the machines that need to connect to the
+# master server, or at least be an IP address.
+MPROV_MASTER_SERVER=master
+
+# OPTIONAL (default 5m)
+# this will set the inactive node (worker or client) purge time.
+# after this time lapses, any inactive worker or client will be
+# removed from the nodes the master server knows about.
+# it will take the 'm' suffix to denote minutes.
+MPROV_MASTER_PURGE="-u 5m"
+
+# REQUIRED:
+# this will set the path that the master node will sync out to all the
+# workers.  This should contain sub-directories that are the root images
+# that you want to use.  The name of the sub-directories are what the clients
+# will request from the workers, and usually match profiles in your master
+# provsioner.
+MPROV_MASTER_PATH="-p /export/images/"
+
+# OPTIONAL: (default 10m)
+# this will set how long master server will wait before it goes through
+# all the workers it knows and asks them to resync to the master image.
+# NOTE: You can override this at any time by sending the master node the
+# "execmd sync" command on its control port from localhost
+# this option also takes the 'm' suffix to denote minutes.
+MPROV_MASTER_SYNC="--sync 10m"
+
+
+MPROV_MASTER_OPTIONS="${MPROV_MASTER_PURGE} ${MPROV_MASTER_PATH} ${MPROV_MASTER_SYNC}"
+
+################# END MASTER SERVER MODE OPTIONS ############################
+
+
+
+############### WORKER SERVER MODE OPTIONS ##########################
+
+# REQUIRED:
+# This will set the path that the worker node stores the image files in.
+MPROV_WORKER_PATH="-p /export/images/"
+
+# REQUIRED:
+# This will set the address of the master server for the worker.
+MPROV_WORKER_MS="--ms ${MPROV_MASTER_SERVER}"
+
+# OPTIONAL: (default 10)
+# This will set the number of "slots" the worker has to serve images
+# to clients.
+MPROV_WORKER_SLOTS="-s 10"
+
+# OPTIONAL: (default 10)
+# This sets how often we should send our heart beat to the master server.
+# This should be LOWER than the MPROV_MASTER_PURGE option above.  It defaults
+# to 10 seconds, but you can probably safely up that to 1 minute to minimize
+# traffic on large systems
+MPROV_WORKER_HB="-b 10"
+
+MPROV_WORKER_OPTIONS="${MPROV_WORKER_PATH} ${MPROV_WORKER_MS} ${MPROV_WORKER_SLOTS} ${MPROV_WORKER_HB}"
+
+################### END WORKER SERVER MODE OPTIONS ######################
