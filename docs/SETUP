@@ -1,0 +1,19 @@
+Setup of mprov is relatively simple.  First you will want to install the RPM on the master, all the workers, and the
+clients (if you are using an NFS root to do this, see the documents about setting up an NFS root to work with mprov.)
+
+On the master and worker nodes, edit /etc/sysconfig/mprov to match your setup.
+
+On the master nodes, run: systemctl enable mprov-master
+
+And on the worker nodes run: systemctl enable mprov-worker
+
+Then, start the master node's service.  Once the master node is up, start the workers.  The workers may take a while to
+finish their syncs.  You can check the status of the workers by telnetting to localhost:4017 on the master node.  NOTE:
+the master node will not accept the following commands from a host that is not localhost.
+
+To see the status of the workers, run: execmd list workers
+
+This will spit out a list of all the workers the master currently knows about, and what their status is.  Once one or
+more workers are in the "updated" status, then you can start running clients to pull down images.  It's really that
+simple.
+

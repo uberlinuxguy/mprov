@@ -1,0 +1,35 @@
+Setting up an NFS root image directory is pretty simple too.  I like to keep my NFS root images in /exports/ but you
+can choose any directory you wish.  This document will go over setting up an initial NFS root image in /exports called
+"default" and getting the mprov rpm installed.
+
+First you need a copy of the latest version of the centos-release package.  The best, and easiest, way to do that is
+to let yum grab it for you.  If you run the following command, yum will download it for you.
+
+# yum -y --downloadonly reinstall centos-release
+
+Yum will download that package into /var/cache/yum/x86_64/7/base/packages/
+
+Next, you need to "install" that package into where you are going to have your NFS root image reside.  In our case, that
+will be /exports/default/ so we tell RPM to install it there:
+
+# rpm -ivh --nodeps --root /export/default/ /var/cache/yum/x86_64/7/base/packages/centos-release-*.centos.x86_64.rpm
+
+This will install the base repo files that yum will need to build the base system from scratch.
+
+Finally, to get a minimal system, you tell yum to install the "Minimal Install" group in the new NFS root image
+directory and go have a sandwich.
+
+ # yum -y --installroot /export/default/ groupinstall "Minimal Install"
+
+ Once that is complete, the /export/default/ directory should contain a virgin CentOS root file system image that you
+ can now go and begin manipulating however you like.
+
+ So if you copy the mprov file in there, let's say into /export/default/tmp and then chroot into the environment,
+ you should be able to install the mprov RPM.
+
+ # chroot /export/default/
+ chroot># yum -y localinstall /tmp/mprov*.rpm
+
+
+ There are many ways to utilize this to create diskless or even disk based file systems off of the new NFS root image.
+ I will add more documentation on how to do this in the future.
