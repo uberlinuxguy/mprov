@@ -1,0 +1,71 @@
+#!/bin/bash
+
+MPROV_REL=`cat mprov-release`
+
+
+RPMBUILD=`which rpmbuild`
+if [ "$RPMBUILD" == "" ]
+then
+	echo "Error: rpmbuild not found in PATH." >&2
+	exit 1
+fi
+
+if [ "$MPROV_REL" == "" ]
+then
+	echo "Error: Cannot determine MPROV release version." >&2
+	echo "Error: Please run this script from within the mprov source tree." >&2
+	exit 1
+fi
+
+# make a temp dir
+TEMP_DIR=`mktemp`
+if [ ! -e $TEMP_DIR ]
+then
+	echo "Error: cannot make a temp dir for building" >&2
+	exit 1
+fi
+
+check_error(){
+	if [ "$?" != "0" ]
+	then
+		echo "Error running build." >&2
+		do_exit
+		exit 1
+	fi
+}
+
+do_exit() {
+	if [ "$TEMP_DIR" != "" ]
+	then
+		if [  -e $TEMP_DIR ]
+		then
+			rm -rf $TEMP_DIR
+		fi
+	fi
+	
+
+}
+# if we got here, it made a temp file, we want a dir.
+rm $TEMP_DIR && mkdir $TEMP_DIR
+check_error
+
+
+# let's do this.
+mkdir -p ${TEMP_DIR}/mprov/
+check_error
+
+cp -rpf ./ ${TEMP_DIR}/mprov/ 
+check_error
+
+cd ${TEMP_DIR}/
+check_error
+
+tar -zcf ${TEMP_DIR}/mprov-0.1.tar.gz mprov
+check_error
+
+rpmbuild -tb mprov-0.1.tar.gz --define "rel $MPROV_REL"
+check_error
+
+echo "Build complete."
+
+do_exit
