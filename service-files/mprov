@@ -6,7 +6,7 @@
 ################ MASTER SERVER MODE OPTIONS #############################
 
 # this should resolve on all the machines that need to connect to the
-# master server, or at least be an IP address.
+# master server, or at least be an IP address. Used by the Worker.
 MPROV_MASTER_SERVER=master
 
 # OPTIONAL (default 5m)
@@ -33,8 +33,6 @@ MPROV_MASTER_PATH="-p /export/images/"
 MPROV_MASTER_SYNC="--sync 10m"
 
 
-MPROV_MASTER_OPTIONS="${MPROV_MASTER_PURGE} ${MPROV_MASTER_PATH} ${MPROV_MASTER_SYNC}"
-
 ################# END MASTER SERVER MODE OPTIONS ############################
 
 
@@ -44,10 +42,6 @@ MPROV_MASTER_OPTIONS="${MPROV_MASTER_PURGE} ${MPROV_MASTER_PATH} ${MPROV_MASTER_
 # REQUIRED:
 # This will set the path that the worker node stores the image files in.
 MPROV_WORKER_PATH="-p /export/images/"
-
-# REQUIRED:
-# This will set the address of the master server for the worker.
-MPROV_WORKER_MS="--ms ${MPROV_MASTER_SERVER}"
 
 # OPTIONAL: (default 10)
 # This will set the number of "slots" the worker has to serve images
@@ -60,7 +54,5 @@ MPROV_WORKER_SLOTS="-s 10"
 # to 10 seconds, but you can probably safely up that to 1 minute to minimize
 # traffic on large systems
 MPROV_WORKER_HB="-b 10"
-
-MPROV_WORKER_OPTIONS="${MPROV_WORKER_PATH} ${MPROV_WORKER_MS} ${MPROV_WORKER_SLOTS} ${MPROV_WORKER_HB}"
 
 ################### END WORKER SERVER MODE OPTIONS ######################

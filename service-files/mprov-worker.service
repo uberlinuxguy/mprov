@@ -7,7 +7,7 @@ After=time-sync.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/sysconfig/mprov
-ExecStart=/usr/bin/mprov -m ${MPROV_WORKER_OPTIONS}
+ExecStart=/usr/bin/mprov -w --ms $MPROV_MASTER_SERVER $MPROV_WORKER_PATH $MPROV_WORKER_MS $MPROV_WORKER_SLOTS $MPROV_WORKER_HB
 
 [Install]
 WantedBy=multi-user.target

@@ -99,33 +99,32 @@ class MasterServer(object):
         """
         size = 1024
         while True:
-            try:
-                data = client.recv(size)
-                if data != "":
-                    data = str(data).strip()
+            # try:
+                packet = utils.parse_packet(client.recv(size))
+                if packet is not None:
 
-                    if data[:6] == "worker":
-                        self._handle_worker_req(client, address, data)
-                    elif data[:6] == "client":
-                        self._handle_client_req(client, address, data)
-                    elif data[:6] == "execmd":
-                        self._handle_cmd(client, address, data[7:])
-                    elif data[:6] == "verify":
-                        req_uuid = data[7:]
+                    if "worker" in packet:
+                        self._handle_worker_req(client, address, packet["raw_packet"])
+                    elif "client" in packet:
+                        self._handle_client_req(client, address, packet["raw_packet"])
+                    elif "execmd" in packet:
+                        self._handle_cmd(client, address, packet["raw_packet"])
+                    elif "verify" in packet:
+                        req_uuid = packet["uuid"]
                         client_req = self._find_req_by_uuid(req_uuid)  # type: MasterServerClientRequest
                         if client_req is None:
                             client.send("err: unable to find request")
                         else:
-                            client.send(client_req.serialize())
+                            client.send(client_req.serialize() + "uuid=" + req_uuid)
                     else:
                         client.send("Error: Unrecognized command.\n")
                 else:
                     client.close()
                     return False
-            except Exception as e:
-                print e
-                client.close()
-                return False
+            #except Exception as e:
+            #    print e
+            #    client.close()
+            #    return False
 
     def _handle_worker_req(self, client, address, data):
         """
@@ -139,12 +138,15 @@ class MasterServer(object):
         :return:
         """
 
-        worker_obj = MasterServerWorkerEntry(data[7:] + " " + address[0])
+        worker_obj = MasterServerWorkerEntry(data + " ip=" + address[0])
 
         # look for this worker already in the list, and just update it's hb entry.
         for worker in self.workers:  # type: MasterServerWorkerEntry
             if worker_obj.get_uuid() == worker.get_uuid():
+                if worker.get_status() == "error":
+                    threading.Thread(target=self._sync_worker, args=(worker,))
                 worker.set_last_hb(time())
+                # print "Worker: " + worker.get_name() + ": hb."
                 client.sendall("ok")
                 return
 
@@ -156,7 +158,7 @@ class MasterServer(object):
         self.workers.append(worker_obj)
         client.sendall("ok")
         print "New worker: " + address[0] + " registered"
-        self._sync_worker(worker_obj)
+        threading.Thread(target=self._sync_worker, args=(worker_obj,)).start()
 
     def _handle_client_req(self, connection, address, data):
         """
@@ -168,13 +170,19 @@ class MasterServer(object):
         :param data: str
         :return:
         """
-        client_obj = MasterServerClientRequest(data[7:] + " " + address[0])  # type: MasterServerClientRequest
+        client_obj = MasterServerClientRequest(data + " ip=" + address[0])  # type: MasterServerClientRequest
 
         # look for this client_request already in the list, and just update it's hb entry.
         for m_client in self.client_requests:  # type: MasterServerClientRequest
             if client_obj.get_uuid() == m_client.get_uuid():
                 m_client.set_last_hb(time())
-                connection.sendall("ok uuid=" + client_obj.get_uuid() + "\n")
+                tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())
+
+                if m_client.get_done():
+                    tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
+
+                connection.sendall("ok uuid=" + client_obj.get_uuid() +
+                                   " worker_ip=" + tmp_worker.get_ip() + "\n")
                 return
 
         client_obj.set_last_hb(time())
@@ -183,13 +191,13 @@ class MasterServer(object):
 
         free_worker = self._find_least_updated_worker()  # type: MasterServerWorkerEntry
         if free_worker is None:
-            connection.sendall("err")
-            connection.close()
+            connection.sendall("err no workers found.")
+            self.client_requests.remove(client_obj)
             return
 
         client_obj.set_worker_uuid(free_worker.get_uuid())
-
-        connection.sendall("ok uuid=" + client_obj.get_uuid() + " " + free_worker.get_ip() + "\n")
+        free_worker.set_slots_in_use(free_worker.get_slots_in_use() + 1 )
+        connection.sendall("ok uuid=" + client_obj.get_uuid() + " worker_ip=" + free_worker.get_ip() + "\n")
 
     def _handle_cmd(self, connection, address, data):
         """
@@ -207,9 +215,9 @@ class MasterServer(object):
             connection.send("Permission Denied.\n\n")
             connection.close()
             return
-
-        if data[:4] == "list":
-            if data[5:12] == "workers":
+        packet = utils.parse_packet(data)
+        if "list" in packet:
+            if "workers" in packet:
                 connection.send("Currently registered workers:\n")
                 for worker in self.workers:  # type: MasterServerWorkerEntry
                     connection.send("\t" + worker.get_name() + " " +
@@ -219,7 +227,7 @@ class MasterServer(object):
                                     str(worker.get_slots_total()) + " " +
                                     str(worker.get_slots_in_use()) + " " +
                                     worker.get_status() + "\n")
-            elif data[5:12] == "clients":
+            elif "clients" in packet:
                 connection.send("Current client requests:\n")
                 for m_client in self.client_requests:  # type: MasterServerClientRequest
                     connection.send("\t" + m_client.get_ip() + " " +
@@ -229,18 +237,33 @@ class MasterServer(object):
                                     m_client.get_uuid() + "\n")
             else:
                 connection.send("Error: Unrecognized command.\n")
-        elif data[:5] == "purge":
+        elif "purge" in packet:
             # issue a request to purge any stale worker nodes.
             # worker_purge calls the function to also purge stale clients.
             self._do_stale_purge()
             connection.send("ok\n")
 
-        elif data[:4] == "sync":
+        elif "sync" in packet:
             # issue a request to sync all worker nodes.
             self._do_worker_syncs()
             connection.send("ok\n")
         else:
             connection.send("Error: Unrecognized command.\n")
+
+    def _find_worker_by_uuid(self, worker_uuid):
+        """
+        find a worker object by uuid
+        :param worker_uuid:
+        :return: the worker if found, None otherwise.
+        :rtype: MasterServerWorkerEntry
+
+        """
+        tmp_worker = None  # type: MasterServerWorkerEntry
+        for worker in self.workers:  # type: MasterServerWorkerEntry
+            if worker.get_uuid() == worker_uuid:
+                tmp_worker = worker
+
+        return tmp_worker
 
     def _find_least_updated_worker(self):
         """
@@ -284,7 +307,7 @@ class MasterServer(object):
         :return: True | False
         :rtype: int
         """
-
+        worker.set_status("syncing")
         # we need to block on the max slots on the master
         while self.__sync_slots_used >= self.__sync_slots:
             # all the slots are busy so block.
@@ -303,9 +326,9 @@ class MasterServer(object):
 
         try:
             sock.sendall("sync master")
-            data = sock.recv(1024)  # type: str
-            if data[:2] != "ok":
-                worker.set_status("sync_error")
+            packet = utils.parse_packet(sock.recv(1024))  # type: dict
+            if "ok" not in packet:
+                worker.set_status("error")
                 sock.close()
                 return False
         except Exception as e:
@@ -315,20 +338,23 @@ class MasterServer(object):
             return False
 
         # get the worker's parameters
-        worker_uuid, port, rsync_mod = data[3:].split()
+        worker_uuid = packet["worker_uuid"]
+        port = packet["port"]
+        rsync_mod = packet["module"]
+        # worker_uuid, port, rsync_mod = data[3:].split()
 
         # double check the worker's supplied params.
-        if worker_uuid is "":
+        if worker_uuid == "":
             worker.set_status("error")
             sock.close()
             return False
 
-        if port is "":
+        if port == "":
             worker.set_status("error")
             sock.close()
             return False
 
-        if rsync_mod is "":
+        if rsync_mod == "":
             worker.set_status("error")
             sock.close()
             return False
@@ -343,27 +369,32 @@ class MasterServer(object):
         pass_file.close()
         os.close(fd)
 
-        print "Run: /usr/bin/rsync -av --progress --password-file=" + file_path + " --port=" + port + " " + \
-              self.__path + "/ " + worker.get_ip() + "::" + rsync_mod
+        if not os.path.isdir("/tmp/mprov/") :
+            # mprov tmp dir doesn't exist.
+            os.mkdir("/tmp/mprov", 700)
 
-        # TODO: code real logging of the rsync.
-        # for now, dump to /dev/null.  Should probably go somewhere useful.
-        devnull = open(os.devnull, 'wb')
+        # open an rsync log for logging.
+        rsync_log = open("/tmp/mprov/master_sync_" + rsync_mod + ".log", "w+")
 
-        rsync_proc = subprocess.Popen(["/usr/bin/rsync",
-                                       "-av",
-                                       "--progress",
-                                       "--password-file=" + file_path,
-                                       "--port=" + port,
-                                       self.__path + "/",
-                                       worker.get_ip() + "::" + rsync_mod], stdout=devnull, stderr=devnull)
-        devnull.close()
+        rsync_args=["/usr/bin/rsync",
+                    "-av",
+                    "--progress",
+                    "--password-file=" + file_path,
+                    "--port=" + port,
+                    self.__path + "/",
+                    "root@" + worker.get_ip() + "::" + rsync_mod]
+        print "Run: " + " ".join(rsync_args)
+
+        rsync_log.write("Run: " + " ".join(rsync_args) + "\n")
+
+        rsync_proc = subprocess.Popen(rsync_args, stdout=rsync_log, stderr=rsync_log)
 
         # wait for the rsync to finish.
         rsync_proc.communicate()
 
         return_code = rsync_proc.returncode
-        os.remove(file_path)
+
+        rsync_log.close()
 
         # connect to the worker and tell it to close up the rsync channel.
         # create a new socket for the worker connection.
@@ -372,9 +403,9 @@ class MasterServer(object):
 
         # worker should reply in 30 seconds or so...
         sock2.settimeout(30)
-        sock2.connect(worker_address)
-
         try:
+            sock2.connect(worker_address)
+
             # send it the signal to shut-down.
             sock2.sendall("stop master")
         except Exception as e:
@@ -385,12 +416,15 @@ class MasterServer(object):
         sock2.close()
 
         # now, let's check the return code of the rsync process and see if it was an error.
-        if return_code is not 0:
+        if return_code != 0  and return_code != 24:
+            utils.print_err("Error: rsync returned '" + str(return_code) + "'")
+            utils.print_err("Error: marking worker as status 'error'")
             worker.set_status("error")
             return False
         else:
             worker.set_status("updated")
             worker.set_last_sync(time())
+            os.remove(file_path)
 
         # once the sync is done, exit our self.
         return True
@@ -440,6 +474,8 @@ class MasterServer(object):
             if w_hb <= time_check:
                 print "Purging client: " + m_client.get_ip()
                 self.client_requests.remove(m_client)
+                tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())  # type: MasterServerWorkerEntry
+                tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
                 return
 
     def _find_req_by_uuid(self, req_uuid):
@@ -464,10 +500,11 @@ class MasterServerWorkerEntry(object):
     __last_hb = 0
 
     def __init__(self, info):
-        (self.__name,
-         self.__UUID,
-         self.__slots_total,
-         self.__ip, ) = info.split()
+        packet = utils.parse_packet(info)
+        self.__name = packet["name"]
+        self.__UUID = packet["worker_uuid"]
+        self.__slots_total = packet["slots"]
+        self.__ip = packet["ip"]
 
     def get_slots_in_use(self):
         return self.__slots_in_use
@@ -497,7 +534,10 @@ class MasterServerWorkerEntry(object):
         self.__last_sync = last_sync
 
     def set_slots_in_use(self, slots_in_use):
-        self.__slots_in_use = slots_in_use
+        if(slots_in_use < 0 ):
+            self.__slots_in_use = 0
+        else:
+            self.__slots_in_use = slots_in_use
 
     def set_status(self, status):
         self.__status = status
@@ -516,6 +556,7 @@ class MasterServerClientRequest(object):
     __req_mod = ""
     __ip = ""
     __last_hb = ""
+    __done = False
 
     def set_last_hb(self, hb):
         self.__last_hb = hb
@@ -559,22 +600,29 @@ class MasterServerClientRequest(object):
     def get_ip(self):
         return self.__ip
 
+    def get_done(self):
+        return self.__done
+
     def __init__(self, data):
         """
 
         :param data:
         :type data: str
         """
-
-        (self.__client_UUID,
-         self.__req_mod,
-         self.__ip) = data.split(None, 2)
-        if self.__ip.find("uuid=") >= 0:
-            (self.__UUID, self.__ip) = self.__ip.split(None, 1)
-            (tmp_junk, self.__UUID) = self.__UUID.split("=", 1)
+        packet = utils.parse_packet(data)
+        self.__client_UUID = packet["client_uuid"]
+        self.__req_mod = packet["image"]
+        self.__ip = packet["ip"]
+        self.__done = packet["state"]
+        if "uuid" in packet:
+            self.__UUID=packet["uuid"]
         else:
+            print "New Client Request from: " + self.__ip
             self.__UUID = str(uuid.uuid4())
         self.__start_time = time()
 
     def serialize(self):
-        return self.__client_UUID + " " + self.__req_mod + " " + self.__ip + " uuid=" + self.__UUID + "\n"
+        return "client_uuid=" + self.__client_UUID + \
+               " image=" + self.__req_mod + \
+               " ip=" + self.__ip + \
+               " uuid=" + self.__UUID + "\n"

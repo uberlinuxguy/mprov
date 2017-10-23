@@ -7,7 +7,7 @@ After=time-sync.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/sysconfig/mprov
-ExecStart=/usr/bin/mprov -m ${MPROV_MASTER_OPTIONS}
+ExecStart=/usr/bin/mprov -m $MPROV_MASTER_PURGE $MPROV_MASTER_PATH $MPROV_MASTER_SYNC
 
 [Install]
 WantedBy=multi-user.target

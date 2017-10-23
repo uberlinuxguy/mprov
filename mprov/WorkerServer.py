@@ -1,6 +1,6 @@
 import re
 from tempfile import mkstemp
-from time import sleep
+from time import sleep, time
 import Config
 import utils
 import socket
@@ -94,49 +94,48 @@ class WorkerServer(object):
         size = 1024
         while True:
             try:
-                data = connection.recv(size)
-                if data:
-                    data = str(data).strip()
+                packet = utils.parse_packet(connection.recv(size))
+                if packet is not None:
 
-                    if data[:4] == "sync":
-                        if data[5:11] == "master":
+                    if "sync" in packet:
+                        if "master" in packet:
                             self.__master_sync_active = True
                             self._handle_master_sync(connection, address)
                             self.__master_sync_active = False
-                        if data[5:11] == "client":
+                        if "client" in packet:
                             if self.__master_sync_active:
                                 connection.send("retry\n")
                                 connection.close()
                                 return False
-                            (hdr, action, req_uuid, ipaddr) = data.split(None, 3)
-                            req_uuid.strip()
-                            self._handle_client_sync(connection, address, req_uuid)
-                    if data[:4] == "stop":
-                        if data[5:11] == "master":
-                            if address[0] == self.__config.get_conf_val("ms"):
-                                self._handle_stop_master_sync(connection, address)
-                                connection.close()
-                                return False
-                        if data[5:11] == "client":
+                            self._handle_client_sync(connection, address, packet["uuid"])
+                    if "stop" in packet:
+                        if "master" in packet:
+                            (hostname, aliaslist, ipaddrlist) = socket.gethostbyname_ex(self.__config.get_conf_val("ms"))
+                            for ipaddr in ipaddrlist:
+                                if (address[0] == ipaddr):
+
+                                    self._handle_stop_master_sync(connection, address)
+                                    connection.close()
+                                    return False
+                            utils.print_err("Error: Unable to find a matching IP for the stop sync command.  ")
+                            utils.print_err("Error: This is highly unexpected behavior and will proabbly leave ")
+                            utils.print_err("Error: an rsync hanging around!")
+                        if "client"in packet:
                             # purge a stale client request, kill any rsyncs running, and open the slot.
                             if address[0] == self.__config.get_conf_val("ms"):
-                                req_uuid = data[11:]
-                                req_uuid.strip()
-                                self._handle_stop_client_sync(connection, address, req_uuid)
+                                self._handle_stop_client_sync(connection, address, packet["uuid"])
                                 connection.close()
                                 return False
-                    if data[:7] == "control":
+                    if "control" in packet:
                         # a control connection request
-                        item = data[8:14]
-                        if item == "client":
+                        if "client" in packet:
                             # this is a client connection request.  Run the handler.
-                            (action, item, req_uuid, req_ipaddr) = data.split(None, 3)
-                            self._handle_client_control(connection, req_uuid)
+                            self._handle_client_control(connection, packet["uuid"])
                     else:
                         connection.close()
                         return False
             except Exception as e:
-                # print e
+                print e
                 connection.close()
                 return False
 
@@ -191,8 +190,11 @@ class WorkerServer(object):
                                         "--config=" + rsyncd_path], shell=False)
         self.__rsyncd_pid = rsyncd_proc.pid
 
-        connection.send("ok " + self.__my_uuid + " " + sync_port + " " + module_name + "\n")
+        connection.send("ok worker_uuid=" + self.__my_uuid + " port=" + sync_port + " module=" + module_name + "\n")
         rsyncd_proc.communicate()
+        # clean up the tmp files.
+        os.remove(rsyncd_path)
+        os.remove(secrets_path)
         connection.close()
         print "Master Sync Complete."
 
@@ -205,7 +207,10 @@ class WorkerServer(object):
         """
         if self.__rsyncd_pid > 0:
             # attempt to terminate the rsyncd process
-            os.kill(self.__rsyncd_pid, signal.SIGTERM)
+            try:
+                os.kill(self.__rsyncd_pid, signal.SIGTERM)
+            except Exception as e :
+                utils.print_err("Error: rsync died unexpectedly!")
         return
 
     def _register_with_master(self):
@@ -217,6 +222,7 @@ class WorkerServer(object):
         # utils.print_err("HB: interval " + str(self.__hb_timer_interval) + " at " + str(time()))
 
         if self.__master_connection is None:
+            print "Setting up new master connection."
             self.__master_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             master_address = (self.__config.get_conf_val("ms"), 4017)
 
@@ -227,11 +233,11 @@ class WorkerServer(object):
         try:
 
             my_hostname = socket.gethostname()
-            self.__master_connection.send("worker " + my_hostname + " " + self.__my_uuid + " " +
-                                          self.__config.get_conf_val("slots") + " \n")
+            self.__master_connection.send("worker name=" + my_hostname + " worker_uuid=" + self.__my_uuid +
+                                          " slots=" + self.__config.get_conf_val("slots") + " \n")
 
-            data = self.__master_connection.recv(1024)  # type: str
-            if data[:2] != "ok":
+            packet = utils.parse_packet(self.__master_connection.recv(1024))
+            if "ok" not in packet:
                 utils.print_err("Error: Master Server responded poorly to our register request. Will retry.")
                 self.__master_connection.close()
                 self.__master_connection = None
@@ -269,9 +275,10 @@ class WorkerServer(object):
             self.__sync_requests.remove(cli_req)
 
             # kill local rsync for the client.
-            if cli_req.get_rsync_pid() > 0:
-                # attempt to terminate the rsyncd process
-                os.kill(cli_req.get_rsync_pid(), signal.SIGTERM)
+            if cli_req.get_rsync_pid() != "":
+                if cli_req.get_rsync_pid() > 0:
+                    # attempt to terminate the rsyncd process
+                    os.kill(cli_req.get_rsync_pid(), signal.SIGTERM)
 
             # release the slot the client was holding.
             self.__slots_in_use = self.__slots_in_use - 1
@@ -301,27 +308,23 @@ class WorkerServer(object):
         sock.settimeout(30)
 
         sock.connect(master_address)
-
-        data = ""
+        packet = None # type: dict
         try:
-            sock.sendall("verify " + req_uuid)
-            data = sock.recv(1024)  # type: str
+            sock.sendall("verify uuid=" + req_uuid)
+            packet = utils.parse_packet(sock.recv(1024))
         except Exception as e:
             print e
             sock.close()
-        try:
 
-            (cli_uuid,
-             req_mod,
-             cli_ip,
-             req_uuid) = data.split(None, 3)
-            (uuid_lbl, req_uuid) = req_uuid.strip().split('=', 1)
-
-        except Exception as e:
+        if packet is None:
             utils.print_err("Error: Master didn't verify sync request.")
-            utils.print_err("Error: Exception: " + e.message)
             self._cleanup_client_req(req_uuid)
             return
+
+        cli_uuid = packet["client_uuid"]
+        req_mod = packet["image"]
+        cli_ip = packet["ip"]
+        req_uuid = packet["uuid"]
 
         # make an WorkerServerSync object and stick it in the list.
         cli_req = WorkerServerSync(req_uuid,
@@ -337,18 +340,27 @@ class WorkerServer(object):
 
         # now we wait for the client to tell us it's ready.
         connection.settimeout(60)
+        packet_client = None # type: dict
         try:
-            data = connection.recv(1024)  # this will block until the client is ready.
+            packet_client = utils.parse_packet(connection.recv(1024))  # this will block until the client is ready.
         except Exception as e:
             utils.print_err("Error: Client didn't reply back. Stopping request.")
             utils.print_err("Error: Exception: " + e.message)
             connection.close()
             cli_req.set_sync_active(False)
+            return
 
-        if data[:2] != "ok":
+        if packet_client is None:
+            utils.print_err("Error: Client didn't reply back. Stopping request.")
+            connection.close()
+            cli_req.set_sync_active(False)
+            return
+
+        if "ok" not in packet_client:
             utils.print_err("Error: Client wasn't ready.")
             connection.close()
             cli_req.set_sync_active(False)
+            return
 
         # handle incoming client sync request.
 
@@ -359,20 +371,15 @@ class WorkerServer(object):
                 # no slots available.  Disconnect
                 cli_req.set_sync_active(False)
                 connection.close()
+                return
 
         # parse the "ok" packet
-        try:
-            (hdr, rsync_uuid, sync_port, mod_name) = data.split(None, 3)
-            mod_name = mod_name.strip()
-        except Exception as e:
-            utils.print_err("Error: Couldn't get data from data packet.")
-            utils.print_err("Error: " + e.message)
-            cli_req.set_sync_active(False)
-            connection.sendall("err")
-            connection.close()
-            return
+        rsync_uuid = packet_client["client_uuid"]
+        sync_port = packet_client["port"]
+        mod_name =  packet_client["module"]
 
         if rsync_uuid != cli_req.get_client_uuid():
+            utils.print_err("Error: request ID mismatch!")
             cli_req.set_sync_active(False)
             connection.sendall("err")
             connection.close()
@@ -387,29 +394,35 @@ class WorkerServer(object):
         pass_file.close()
         os.close(fd)
 
-        print "Run: /usr/bin/rsync -av --progress --password-file=" + file_path + " --port=" + sync_port + " " + \
-              self.__path + "/" + cli_req.get_req_mod() + "/ " + address[0] + "::" + mod_name
+        rsync_args = ["/usr/bin/rsync",
+                      "-av",
+                      "--progress",
+                      "--port=" + sync_port,
+                      "--password-file=" + file_path,
+                      self.__path + "/" + cli_req.get_req_mod() + "/",
+                      "root@" + address[0] + "::" + mod_name ]
+        print " ".join(rsync_args)
 
-        # TODO: code real logging of the rsync.
-        # for now, dump to /dev/null.  Should probably go somewhere useful.
-        devnull = open(os.devnull, 'wb')
+        # logging of the rsync.
+        if not os.path.isdir("/tmp/mprov/"):
+            # mprov tmp dir doesn't exist.
+            os.mkdir("/tmp/mprov", 700)
 
-        rsync_proc = subprocess.Popen(["/usr/bin/rsync", sync_port,
-                                       "-av",
-                                       "--progress",
-                                       "--password-file=" + file_path,
-                                       "--port=" + sync_port,
-                                       self.__path + "/" + cli_req.get_req_mod() + "/",
-                                       address[0] + "::" + mod_name ],
-                                      stdout=devnull, stderr=devnull)
+        # open an rsync log for logging.
+        rsync_log = open("/tmp/mprov/client_sync_" + mod_name + ".log", "w+")
+
+        rsync_proc = subprocess.Popen(rsync_args, stdout=rsync_log, stderr=rsync_log)
 
         # wait for the rsync to finish.
         rsync_proc.communicate()
-        devnull.close()
+        rsync_log.close()
 
-        # TODO: examine return code and log.... something...
+        # examine return code and log.... something...
         return_code = rsync_proc.returncode
-        os.remove(file_path)
+        if return_code != 0 and return_code != 24:
+            utils.print_err("Error: Client rsync died prematurely! RC=" + str(return_code))
+        else:
+            os.remove(file_path)
 
         # mark the sync as done.
         cli_req.set_sync_active(False)
@@ -429,8 +442,8 @@ class WorkerServer(object):
         # we have a valid request UUID, so let's check it's status
         while cli_req.is_sync_active():
             try:
-                data = connection.recv(10)
-                if data[:2] != "ok":
+                packet = utils.parse_packet(connection.recv(10))
+                if  "ok" not in packet:
                     # something went wrong on teh client side.
                     # Clean up the request and remove it.
                     connection.sendall("err")
