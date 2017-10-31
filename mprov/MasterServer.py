@@ -387,6 +387,9 @@ class MasterServer(object):
 
         rsync_log.write("Run: " + " ".join(rsync_args) + "\n")
 
+        # wait a couple of seconds for the worker to set up the sync
+        sleep(5)
+
         rsync_proc = subprocess.Popen(rsync_args, stdout=rsync_log, stderr=rsync_log)
 
         # wait for the rsync to finish.
