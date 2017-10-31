@@ -411,6 +411,10 @@ class WorkerServer(object):
         # open an rsync log for logging.
         rsync_log = open("/tmp/mprov/client_sync_" + mod_name + ".log", "w+")
 
+        # we are about to run but give the client a couple of seconds to make sure the
+        # rsync is set up on their end
+        sleep(5)
+
         rsync_proc = subprocess.Popen(rsync_args, stdout=rsync_log, stderr=rsync_log)
 
         # wait for the rsync to finish.
