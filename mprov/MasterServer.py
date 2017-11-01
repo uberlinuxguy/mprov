@@ -276,13 +276,24 @@ class MasterServer(object):
 
         tmp_worker = None  # type: MasterServerWorkerEntry
         for worker in self.workers:  # type: MasterServerWorkerEntry
+            # if this worker is updated.
             if worker.get_status() == "updated":
+                # if this worker has no used slots, return it.
                 if 0 <= worker.get_slots_in_use():
-                    if tmp_worker is None:
-                        tmp_worker = worker
-                    elif worker.get_slots_in_use() < tmp_worker.get_slots_in_use():
-                        tmp_worker = worker
-
+                    return worker
+                else:
+                    # if this worker has used slots but less used slots than total slots.
+                    if worker.get_slots_in_use() < worker.get_slots_total():
+                        # assign tmp_worker if this is the first found worker
+                        if tmp_worker is None:
+                            tmp_worker = worker
+                        # otherwise, see if this worker has less slots in use than
+                        # the previous one.
+                        elif worker.get_slots_in_use() < tmp_worker.get_slots_in_use():
+                            # if so, assign it to tmp_worker and iterate.
+                            tmp_worker = worker
+        # should either be None, if no worker is found to have any open slots.
+        # or the worker with the least open slots.
         return tmp_worker
 
     def _do_worker_syncs(self):
