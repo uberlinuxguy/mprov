@@ -36,10 +36,13 @@ cp service-files/mprov %{buildroot}/etc/sysconfig/
 /usr/bin/mprov
 %{python2_sitelib}/mprov
 /usr/lib/systemd/system/*
-/etc/sysconfig/*
+%config /etc/sysconfig/mprov
 
 
 
 %changelog
+* Wed Nov 01 2017 Jason Williams <jasonw@tulg.org>
+- fixed /etc/sysconfig/mprov to be a config file.
+
 * Tue Aug 22 2017 Jason Williams <jasonw@tulg.org>
 - Initial RPM release
