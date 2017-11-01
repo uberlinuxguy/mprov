@@ -279,7 +279,7 @@ class MasterServer(object):
             # if this worker is updated.
             if worker.get_status() == "updated":
                 # if this worker has no used slots, return it.
-                if 0 <= worker.get_slots_in_use():
+                if worker.get_slots_in_use() <= 0:
                     return worker
                 else:
                     # if this worker has used slots but less used slots than total slots.
@@ -522,10 +522,10 @@ class MasterServerWorkerEntry(object):
         self.__ip = packet["ip"]
 
     def get_slots_in_use(self):
-        return self.__slots_in_use
+        return int(self.__slots_in_use)
 
     def get_slots_total(self):
-        return self.__slots_total
+        return int(self.__slots_total)
 
     def get_status(self):
         return self.__status
