@@ -178,7 +178,7 @@ class MasterServer(object):
                 m_client.set_last_hb(time())
                 tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())
 
-                if m_client.get_done():
+                if m_client.get_done() == "done":
                     tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
 
                 connection.sendall("ok uuid=" + client_obj.get_uuid() +
@@ -197,6 +197,7 @@ class MasterServer(object):
 
         client_obj.set_worker_uuid(free_worker.get_uuid())
         free_worker.set_slots_in_use(free_worker.get_slots_in_use() + 1 )
+    
         connection.sendall("ok uuid=" + client_obj.get_uuid() + " worker_ip=" + free_worker.get_ip() + "\n")
 
     def _handle_cmd(self, connection, address, data):

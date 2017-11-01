@@ -31,8 +31,8 @@
       <file leaf-file-name="Client.py" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/mprov/Client.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="108">
-              <caret line="253" column="42" lean-forward="true" selection-start-line="253" selection-start-column="42" selection-end-line="253" selection-end-column="42" />
+            <state relative-caret-position="4320">
+              <caret line="253" column="42" lean-forward="false" selection-start-line="253" selection-start-column="42" selection-end-line="253" selection-end-column="42" />
               <folding>
                 <element signature="e#0#9#0" expanded="true" />
               </folding>
@@ -43,8 +43,8 @@
       <file leaf-file-name="MasterServer.py" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/mprov/MasterServer.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="180">
-              <caret line="390" column="16" lean-forward="false" selection-start-line="390" selection-start-column="16" selection-end-line="390" selection-end-column="16" />
+            <state relative-caret-position="177">
+              <caret line="180" column="49" lean-forward="false" selection-start-line="180" selection-start-column="49" selection-end-line="180" selection-end-column="49" />
               <folding>
                 <element signature="e#0#11#0" expanded="true" />
               </folding>
@@ -75,7 +75,7 @@
       <file leaf-file-name="WorkerServer.py" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/mprov/WorkerServer.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="434">
+            <state relative-caret-position="7596">
               <caret line="432" column="0" lean-forward="false" selection-start-line="432" selection-start-column="0" selection-end-line="432" selection-end-column="0" />
               <folding>
                 <element signature="e#0#9#0" expanded="true" />
@@ -96,8 +96,6 @@
   </component>
   <component name="FindInProjectRecents">
     <findStrings>
-      <find>error</find>
-      <find>master_connection</find>
       <find>worker hb</find>
       <find>__hb_timer</find>
       <find>hb_timer</find>
@@ -126,6 +124,8 @@
       <find>state</find>
       <find>&quot;uuid&quot;</find>
       <find>--pro</find>
+      <find>set_slots_in_use</find>
+      <find>get_done</find>
     </findStrings>
   </component>
   <component name="Git.Settings">
@@ -179,18 +179,6 @@
       <foldersAlwaysOnTop value="true" />
     </navigator>
     <panes>
-      <pane id="ProjectPane">
-        <subPane>
-          <expand>
-            <path>
-              <item name="mprov" type="b2602c69:ProjectViewProjectNode" />
-              <item name="mprov" type="462c0819:PsiDirectoryNode" />
-            </path>
-          </expand>
-          <select />
-        </subPane>
-      </pane>
-      <pane id="Scratches" />
       <pane id="Scope">
         <subPane subId="Project Files">
           <expand>
@@ -207,6 +195,18 @@
               <item name="Root" type="cbb8eebc:String" user="Root" />
               <item name="mprov" type="cbb8eebc:String" user="mprov" />
               <item name="service-files" type="cbb8eebc:String" user="service-files" />
+            </path>
+          </expand>
+          <select />
+        </subPane>
+      </pane>
+      <pane id="Scratches" />
+      <pane id="ProjectPane">
+        <subPane>
+          <expand>
+            <path>
+              <item name="mprov" type="b2602c69:ProjectViewProjectNode" />
+              <item name="mprov" type="462c0819:PsiDirectoryNode" />
             </path>
           </expand>
           <select />
@@ -331,16 +331,16 @@
     </todo-panel>
   </component>
   <component name="ToolWindowManager">
-    <frame x="-1" y="28" width="1922" height="966" extended-state="6" />
+    <frame x="200" y="56" width="1922" height="966" extended-state="6" />
     <editor active="true" />
     <layout>
-      <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.20588236" sideWeight="0.4274953" order="0" side_tool="false" content_ui="combo" />
+      <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.20855615" sideWeight="0.42075473" order="0" side_tool="false" content_ui="combo" />
       <window_info id="TODO" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.32928312" sideWeight="0.49465242" order="6" side_tool="false" content_ui="tabs" />
-      <window_info id="Event Log" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.35085574" sideWeight="0.38502672" order="7" side_tool="true" content_ui="tabs" />
+      <window_info id="Event Log" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.35207823" sideWeight="0.38502672" order="7" side_tool="true" content_ui="tabs" />
       <window_info id="Run" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.32806805" sideWeight="0.4893048" order="2" side_tool="false" content_ui="tabs" />
       <window_info id="Version Control" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="8" side_tool="false" content_ui="tabs" />
       <window_info id="Python Console" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="9" side_tool="false" content_ui="tabs" />
-      <window_info id="Structure" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.20588236" sideWeight="0.5725047" order="2" side_tool="true" content_ui="tabs" />
+      <window_info id="Structure" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.20855615" sideWeight="0.57924527" order="2" side_tool="true" content_ui="tabs" />
       <window_info id="Terminal" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="10" side_tool="false" content_ui="tabs" />
       <window_info id="Debug" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.34963325" sideWeight="0.61497325" order="3" side_tool="false" content_ui="tabs" />
       <window_info id="Favorites" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.19411765" sideWeight="0.5400763" order="1" side_tool="true" content_ui="tabs" />
@@ -736,8 +736,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/mprov/Client.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="108">
-          <caret line="253" column="42" lean-forward="true" selection-start-line="253" selection-start-column="42" selection-end-line="253" selection-end-column="42" />
+        <state relative-caret-position="4320">
+          <caret line="253" column="42" lean-forward="false" selection-start-line="253" selection-start-column="42" selection-end-line="253" selection-end-column="42" />
           <folding>
             <element signature="e#0#9#0" expanded="true" />
           </folding>
@@ -746,7 +746,7 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/mprov/WorkerServer.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="434">
+        <state relative-caret-position="7596">
           <caret line="432" column="0" lean-forward="false" selection-start-line="432" selection-start-column="0" selection-end-line="432" selection-end-column="0" />
           <folding>
             <element signature="e#0#9#0" expanded="true" />
@@ -757,8 +757,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/mprov/MasterServer.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="180">
-          <caret line="390" column="16" lean-forward="false" selection-start-line="390" selection-start-column="16" selection-end-line="390" selection-end-column="16" />
+        <state relative-caret-position="177">
+          <caret line="180" column="49" lean-forward="false" selection-start-line="180" selection-start-column="49" selection-end-line="180" selection-end-column="49" />
           <folding>
             <element signature="e#0#11#0" expanded="true" />
           </folding>
