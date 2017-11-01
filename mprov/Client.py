@@ -272,17 +272,31 @@ class Client(object):
 
         sock.close()
         print "Worker Sync Complete."
-        if self.__master_connection is not None:
-            cmd_send = "client client_uuid=" + self.__my_uuid + \
-                       " image=" + self.__config.get_conf_val("image")
-            if self.__req_uuid != "":
-                cmd_send = cmd_send + " uuid=" + self.__req_uuid
-            if not self.__syncing:
-                cmd_send = cmd_send + " state=done"
-            cmd_send += "\n"
 
-            self.__master_connection.send(cmd_send)
-            self.__master_connection.recv(1024)
+        if self.__master_connection is None:
+            self.__master_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            # master should reply in 30 seconds or so...
+            self.__master_connection.settimeout(30)
+            master_address = (self.__config.get_conf_val("ms"), 4017)
+
+            try:
+                self.__master_connection.connect(master_address)
+                cmd_send = "client client_uuid=" + self.__my_uuid + \
+                           " image=" + self.__config.get_conf_val("image")
+                if self.__req_uuid != "":
+                    cmd_send = cmd_send + " uuid=" + self.__req_uuid
+                if not self.__syncing:
+                    cmd_send = cmd_send + " state=done"
+                cmd_send += "\n"
+
+                self.__master_connection.send(cmd_send)
+                self.__master_connection.recv(1024)
+
+            except Exception as e:
+                utils.print_err("Error: Master Connection failed. ")
+                utils.print_err("Error: " + e.message)
+                utils.print_err("Error: Stale connection likely present on master.")
 
         self.__syncing = False
         self.__exiting = True
