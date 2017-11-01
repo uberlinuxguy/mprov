@@ -172,13 +172,14 @@ class MasterServer(object):
         """
         client_obj = MasterServerClientRequest(data + " ip=" + address[0])  # type: MasterServerClientRequest
 
+
         # look for this client_request already in the list, and just update it's hb entry.
         for m_client in self.client_requests:  # type: MasterServerClientRequest
             if client_obj.get_uuid() == m_client.get_uuid():
                 m_client.set_last_hb(time())
                 tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())
 
-                if m_client.get_done() == "done":
+                if client_obj.get_done() == "done":
                     tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
 
                 connection.sendall("ok uuid=" + client_obj.get_uuid() +
