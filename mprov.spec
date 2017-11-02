@@ -32,6 +32,12 @@ cp service-files/mprov-worker.service %{buildroot}/usr/lib/systemd/system/
 mkdir -p %{buildroot}/etc/sysconfig/
 cp service-files/mprov %{buildroot}/etc/sysconfig/
 
+%post
+/usr/bin/systemctl daemon-reload
+
+%postun
+/usr/bin/systemctl daemon-reload
+
 %files
 /usr/bin/mprov
 %{python2_sitelib}/mprov
@@ -41,6 +47,9 @@ cp service-files/mprov %{buildroot}/etc/sysconfig/
 
 
 %changelog
+* Fri Nov 03 2017 Jason Williams <jasonw@tulg.org>
+- reload of systemd after install/uninstall
+
 * Wed Nov 01 2017 Jason Williams <jasonw@tulg.org>
 - fixed /etc/sysconfig/mprov to be a config file.
 
