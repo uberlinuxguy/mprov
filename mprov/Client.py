@@ -203,9 +203,10 @@ class Client(object):
         # give the worker 1 minute to reply, he has to check with the master.
         sock.settimeout(60)
 
-        sock.connect(worker_address)
+
 
         try:
+            sock.connect(worker_address)
             sock.sendall("sync client uuid=" + self.__req_uuid + " client_uuid=" + self.__my_uuid)
             packet = utils.parse_packet(sock.recv(1024))
             if "ok" not in packet:
@@ -219,6 +220,7 @@ class Client(object):
             utils.print_err("Error: Exception in worker comms: " + e.message)
             self.__syncing = False
             self.__retries += 1
+            self.__notify_master_error(worker_ip)
             return False
 
         # worker is connected
@@ -316,3 +318,40 @@ class Client(object):
         if self.__rsyncd_pid > 0:
             # attempt to terminate the rsyncd process
             os.kill(self.__rsyncd_pid, signal.SIGTERM)
+
+    def _notify_master_error(self, worker_ip):
+        if self.__master_connection is None:
+            self.__master_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            # master should reply in 30 seconds or so...
+            self.__master_connection.settimeout(30)
+            master_address = (self.__config.get_conf_val("ms"), 4017)
+
+            try:
+                self.__master_connection.connect(master_address)
+
+            except Exception as e:
+                utils.print_err("Error: Master Connection failed. ")
+                utils.print_err("Error: " + e.message)
+
+        if self.__master_connection is not None:
+            cmd_send = "client client_uuid=" + self.__my_uuid + " image=" + self.__config.get_conf_val("image")
+            if self.__req_uuid != "":
+                cmd_send = cmd_send + " uuid=" + self.__req_uuid
+            cmd_send = cmd_send + " state=syncing worker="
+            cmd_send = cmd_send +  worker_ip + " worker_state=error"
+
+            cmd_send += "\n"
+
+            cmd_send = "client client_uuid=" + self.__my_uuid + \
+                       " image=" + self.__config.get_conf_val("image")
+            if self.__req_uuid != "":
+                cmd_send = cmd_send + " uuid=" + self.__req_uuid
+            cmd_send = cmd_send + " state=done"
+            cmd_send += "\n"
+            utils.print_err("Sending to master: " + cmd_send)
+            self.__master_connection.send(cmd_send)
+            self.__master_connection.recv(1024)
+        else:
+            utils.print_err("Error: Unable to notify master.")
+            utils.print_err("Error: Stale connection likely present on master.")

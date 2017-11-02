@@ -106,7 +106,21 @@ class MasterServer(object):
                     if "worker" in packet:
                         self._handle_worker_req(client, address, packet["raw_packet"])
                     elif "client" in packet:
-                        self._handle_client_req(client, address, packet["raw_packet"])
+                        if "worker_state" in packet:
+                            if packet['worker_state'] == "error":
+                                # the client thinks the worker is bad, let's see if they are a valid client.
+                                req=self._find_req_by_uuid(packet["uuid"])
+                                if req is not None:
+                                    # valid request
+                                    worker=self._find_worker_by_uuid(req.get_worker_uuid())
+                                    if worker is not None:
+                                        worker.set_status("error")
+                                    else:
+                                        utils.print_err("Error: client reported error on unknown worker.")
+                                else:
+                                    utils.print_err("Error: client with unknown request " +
+                                                    "attempted to report worker error")
+                         self._handle_client_req(client, address, packet["raw_packet"])
                     elif "execmd" in packet:
                         self._handle_cmd(client, address, packet["raw_packet"])
                     elif "verify" in packet:
@@ -188,7 +202,8 @@ class MasterServer(object):
 
         client_obj.set_last_hb(time())
         self.client_requests.append(client_obj)
-        # TODO: look up the least used worker and send the client there.
+        #
+        # look up the least used worker and send the client there.
 
         free_worker = self._find_least_updated_worker()  # type: MasterServerWorkerEntry
         if free_worker is None:
