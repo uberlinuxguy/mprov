@@ -203,8 +203,6 @@ class Client(object):
         # give the worker 1 minute to reply, he has to check with the master.
         sock.settimeout(60)
 
-
-
         try:
             sock.connect(worker_address)
             sock.sendall("sync client uuid=" + self.__req_uuid + " client_uuid=" + self.__my_uuid)
