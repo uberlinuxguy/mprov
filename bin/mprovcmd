@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# a simple wrapper around netcat (nc) to allow the admin to interact with
+# the mprov master server.
+
+# include the mprov config
+. /etc/sysconfig/mprov
+
+# hard coded right now, no filtering of the command either.
+echo "execmd $@" | nc localhost 4017
