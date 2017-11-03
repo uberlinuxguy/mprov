@@ -107,20 +107,19 @@ class MasterServer(object):
                         self._handle_worker_req(client, address, packet["raw_packet"])
                     elif "client" in packet:
                         if "worker_state" in packet:
+                            # the client thinks the worker is bad, let's see if they are a valid client.
                             if packet['worker_state'] == "error":
-                                # the client thinks the worker is bad, let's see if they are a valid client.
                                 req=self._find_req_by_uuid(packet["uuid"])
+                                # valid request
                                 if req is not None:
-                                    # valid request
                                     worker=self._find_worker_by_uuid(req.get_worker_uuid())
                                     if worker is not None:
                                         worker.set_status("error")
                                     else:
                                         utils.print_err("Error: client reported error on unknown worker.")
                                 else:
-                                    utils.print_err("Error: client with unknown request " +
-                                                    "attempted to report worker error")
-                         self._handle_client_req(client, address, packet["raw_packet"])
+                                    utils.print_err("Error: unknown request attempted to report worker error")
+                        self._handle_client_req(client, address, packet["raw_packet"])
                     elif "execmd" in packet:
                         self._handle_cmd(client, address, packet["raw_packet"])
                     elif "verify" in packet:
@@ -335,13 +334,60 @@ class MasterServer(object):
         :return: True | False
         :rtype: int
         """
+
+        force_master_sync = False
+
+        if worker.get_status() == "pending":
+            # worker was synced by another worker, so
+            # force a sync from us just to make sure we have
+            # valid copy.
+            force_master_sync = True
+
+        # if this worker is local only sync to master.
+        #if worker.get_name() == socket.gethostname():
+        #    force_master_sync = True
+
         worker.set_status("syncing")
-        # we need to block on the max slots on the master
-        while self.__sync_slots_used >= self.__sync_slots:
-            # all the slots are busy so block.
-            sleep(10)
-            # TODO: Code in here handoff of the worker sync if another
-            # worker has an updated copy
+
+        if not force_master_sync:
+            # if we are not forcing a master sync,
+            # attempt to hand off the client to a worker
+            worker_sync = self._find_least_updated_worker()
+
+            # don't allow a worker to sync to itself.
+            if worker_sync is not None:
+                if worker_sync.get_uuid() == worker.get_uuid():
+                    worker_sync = None
+
+            # found a worker, send them off.
+            if worker_sync is not None:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+                try:
+                    # get the ip of the worker we are going to sync TO
+                    worker_address = (worker.get_ip(), 4018)
+                    # connect to the recipient worker and tell it to sync FROM worker_sync
+                    sock.connect(worker_address)
+                    sock.sendall("sync master worker=" + worker_sync.get_ip())
+                    packet = utils.parse_packet(sock.recv(1024))  # type: dict
+                    if "ok" not in packet:
+                        worker.set_status("error")
+                        sock.close()
+                        return False
+
+                    # set the state to pending to let the master double check the sync
+                    worker.set_status("pending")
+                    self._sync_worker(worker)
+                    return True
+                except Exception as e:
+                    utils.print_err("Error: worker to worker sync failed, failing back to master sync")
+                    utils.print_err(e)
+                    sock.close()
+                    worker.set_status("pending")
+                    return False
+
+        # no worker found or master sync forced, so proceed with
+        # normal master sync.
 
         # connect to the worker and wait for it to reply that it's ready.
         # create a new socket for the worker connection.
@@ -350,9 +396,8 @@ class MasterServer(object):
 
         sock.settimeout(30)
 
-        sock.connect(worker_address)
-
         try:
+            sock.connect(worker_address)
             sock.sendall("sync master")
             packet = utils.parse_packet(sock.recv(1024))  # type: dict
             if "ok" not in packet:
@@ -360,7 +405,7 @@ class MasterServer(object):
                 sock.close()
                 return False
         except Exception as e:
-            print e
+            utils.print_err("Error: Unable to talk to worker at " + worker_address[0] + ": " + e.message)
             sock.close()
             worker.set_status("error")
             return False
@@ -565,7 +610,7 @@ class MasterServerWorkerEntry(object):
         self.__last_sync = last_sync
 
     def set_slots_in_use(self, slots_in_use):
-        if(slots_in_use < 0 ):
+        if slots_in_use < 0:
             self.__slots_in_use = 0
         else:
             self.__slots_in_use = slots_in_use
