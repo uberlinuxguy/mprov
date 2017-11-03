@@ -70,11 +70,11 @@ class MasterServer(object):
         self.sock.listen(1024)
 
         # create a timer for syncing
-        self.__sync_timer = threading.Timer(self.__sync_timer_interval, self._do_worker_syncs)
+        self.__sync_timer = threading.Timer(self.__sync_timer_interval, self._worker_sync_timer())
         self.__sync_timer.start()
 
         # create a timer for purge checking
-        self.__purge_timer = threading.Timer(self.__purge_timer_interval, self._do_stale_purge)
+        self.__purge_timer = threading.Timer(self.__purge_timer_interval, self._stale_purge_timer)
         self.__purge_timer.start()
 
         while True:
@@ -312,6 +312,12 @@ class MasterServer(object):
         # or the worker with the least open slots.
         return tmp_worker
 
+    def _worker_sync_timer(self):
+        self._do_worker_syncs()
+        if not self.__exiting:
+            self.__sync_timer = threading.Timer(self.__sync_timer_interval, self._worker_sync_timer)
+            self.__sync_timer.start()
+
     def _do_worker_syncs(self):
         """"
         timer function to sync the worker nodes and remove any stale workers.
@@ -329,9 +335,6 @@ class MasterServer(object):
                 if worker.get_status() != "error":
                     worker.set_status("syncing")
                     threading.Thread(target=self._sync_worker, args=(worker,)).start()
-        if not self.__exiting:
-            self.__sync_timer = threading.Timer(self.__sync_timer_interval, self._do_worker_syncs)
-            self.__sync_timer.start()
 
     def _sync_worker(self, worker):
         """
@@ -534,6 +537,13 @@ class MasterServer(object):
         # once the sync is done, exit our self.
         return True
 
+    def _stale_purge_timer(self):
+        self._do_stale_purge()
+        if not self.__exiting:
+            # restart the timer.
+            self.__purge_timer = threading.Timer(self.__purge_timer_interval, self._stale_purge_timer)
+            self.__purge_timer.start()
+
     def _do_stale_purge(self):
         """
         timer function to purge stale stuff.
@@ -541,10 +551,6 @@ class MasterServer(object):
         """
         self._do_worker_purge()
         self._do_client_purge()
-        if not self.__exiting:
-            # restart the timer.
-            self.__purge_timer = threading.Timer(self.__purge_timer_interval, self._do_stale_purge)
-            self.__purge_timer.start()
 
     def _do_worker_purge(self):
         """
