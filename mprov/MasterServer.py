@@ -109,10 +109,10 @@ class MasterServer(object):
                         if "worker_state" in packet:
                             # the client thinks the worker is bad, let's see if they are a valid client.
                             if packet['worker_state'] == "error":
-                                req=self._find_req_by_uuid(packet["uuid"])
+                                req = self._find_req_by_uuid(packet["uuid"])
                                 # valid request
                                 if req is not None:
-                                    worker=self._find_worker_by_uuid(req.get_worker_uuid())
+                                    worker = self._find_worker_by_uuid(req.get_worker_uuid())
                                     if worker is not None:
                                         worker.set_status("error")
                                     else:

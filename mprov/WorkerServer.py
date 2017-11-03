@@ -284,22 +284,22 @@ class WorkerServer(object):
                 self.__master_connection.close()
                 self.__master_connection = None
                 utils.print_err("Error: Problem communicating with master server. Will Retry")
+        if self.__master_connection is not None:
+            try:
+                my_hostname = socket.gethostname()
+                self.__master_connection.send("worker name=" + my_hostname + " worker_uuid=" + self.__my_uuid +
+                                              " slots=" + self.__config.get_conf_val("slots") + " \n")
 
-        try:
-            my_hostname = socket.gethostname()
-            self.__master_connection.send("worker name=" + my_hostname + " worker_uuid=" + self.__my_uuid +
-                                          " slots=" + self.__config.get_conf_val("slots") + " \n")
-
-            packet = utils.parse_packet(self.__master_connection.recv(1024))
-            if "ok" not in packet:
-                utils.print_err("Error: Master Server responded poorly to our register request. Will retry.")
-                self.__master_connection.close()
+                packet = utils.parse_packet(self.__master_connection.recv(1024))
+                if "ok" not in packet:
+                    utils.print_err("Error: Master Server responded poorly to our register request. Will retry.")
+                    self.__master_connection.close()
+                    self.__master_connection = None
+            except Exception as e:
+                if self.__master_connection is not None:
+                    self.__master_connection.close()
                 self.__master_connection = None
-        except Exception as e:
-            if self.__master_connection is not None:
-                self.__master_connection.close()
-            self.__master_connection = None
-            utils.print_err("Error: Problem communicating with master server. Will Retry")
+                utils.print_err("Error: Problem communicating with master server. Will Retry")
         # set this function up as a re-occuring timer based on the -b/--heartbeat option.
         # utils.print_err("HB: interval " + str(self.__hb_timer_interval) + " at " + str(time()))
         self.__hb_timer = threading.Timer(self.__hb_timer_interval, self._register_with_master)
