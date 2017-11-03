@@ -18,7 +18,7 @@ class MasterServer(object):
     __config = None  # type: Config
     __sync_timer_interval = 0
     __purge_timer_interval = 0
-    __sync_slots = 10  # hard coded for master server.
+    __sync_slots = 1  # hard coded for master server.
     __sync_slots_used = 0
     __path = ""
     __exiting = False
@@ -261,6 +261,7 @@ class MasterServer(object):
 
         elif "sync" in packet:
             # issue a request to sync all worker nodes.
+            print "Full sync requested. Invalidating all workers."
             self._do_worker_syncs()
             connection.send("ok\n")
         else:
@@ -316,6 +317,12 @@ class MasterServer(object):
         timer function to sync the worker nodes and remove any stale workers.
         """
         print "Worker Sync Started."
+        # first invalidate all the workers.
+        for worker in self.workers:
+            if worker.get_status() != "syncing":
+                if worker.get_status() != "error":
+                    worker.set_status("outdated")
+
         # now step through the remaining workers and sync anyone that isn't syncing.
         for worker in self.workers:  # type: MasterServerWorkerEntry
             if worker.get_status() != "syncing":
@@ -341,6 +348,7 @@ class MasterServer(object):
             # worker was synced by another worker, so
             # force a sync from us just to make sure we have
             # valid copy.
+            self.__sync_slots_used = self.__sync_slots_used + 1
             force_master_sync = True
 
         # if this worker is local only sync to master.
@@ -349,45 +357,63 @@ class MasterServer(object):
 
         worker.set_status("syncing")
 
-        if not force_master_sync:
+        # if the master is full.
+
+        while not force_master_sync:
+            # only try to send us to a worker if we aren't being forced to a master sync
             # if we are not forcing a master sync,
             # attempt to hand off the client to a worker
             worker_sync = self._find_least_updated_worker()
-
-            # don't allow a worker to sync to itself.
             if worker_sync is not None:
+                # increment the worker's use count.
+                worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() + 1)
+
+                # don't allow a worker to sync to itself.
                 if worker_sync.get_uuid() == worker.get_uuid():
                     worker_sync = None
+                    worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
+                    # if we are alone and no one is syncing to the master, let us do it.
+                    if self.__sync_slots_used < self.__sync_slots:
+                        self.__sync_slots_used = self.__sync_slots_used + 1
+                        force_master_sync = True
+                else:
+                    # we have a valid, updated worker, try a sync
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-            # found a worker, send them off.
-            if worker_sync is not None:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    try:
+                        # get the ip of the worker we are going to sync TO
+                        worker_address = (worker.get_ip(), 4018)
+                        # connect to the recipient worker and tell it to sync FROM worker_sync
+                        sock.connect(worker_address)
+                        # increment the worker's in use counter.
 
-                try:
-                    # get the ip of the worker we are going to sync TO
-                    worker_address = (worker.get_ip(), 4018)
-                    # connect to the recipient worker and tell it to sync FROM worker_sync
-                    sock.connect(worker_address)
-                    sock.sendall("sync master worker=" + worker_sync.get_ip())
-                    packet = utils.parse_packet(sock.recv(1024))  # type: dict
-                    if "ok" not in packet:
-                        worker.set_status("error")
+                        sock.sendall("sync master worker=" + worker_sync.get_ip())
+                        packet = utils.parse_packet(sock.recv(1024))  # type: dict
+                        # then decrement it after it's over.
+                        worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
+                        if "ok" not in packet:
+                            worker.set_status("error")
+                            sock.close()
+
+                        # status is updated from an updated worker, set to upadted
+                        worker.set_status("updated")
+                        worker.set_last_sync(time())
+                        return True
+                    except Exception as e:
+                        utils.print_err("Error: worker to worker sync failed")
+                        utils.print_err(e)
                         sock.close()
-                        return False
-
-                    # set the state to pending to let the master double check the sync
-                    worker.set_status("pending")
-                    self._sync_worker(worker)
-                    return True
-                except Exception as e:
-                    utils.print_err("Error: worker to worker sync failed, failing back to master sync")
-                    utils.print_err(e)
-                    sock.close()
-                    worker.set_status("pending")
-                    return False
+            else:
+                # no updated nodes, if the master is available, let's try that.
+                if self.__sync_slots_used < self.__sync_slots:
+                    self.__sync_slots_used = self.__sync_slots_used + 1
+                    force_master_sync = True
+            # otherwise, wait a bit and try again.
+            sleep(5)
 
         # no worker found or master sync forced, so proceed with
         # normal master sync.
+
 
         # connect to the worker and wait for it to reply that it's ready.
         # create a new socket for the worker connection.
@@ -499,6 +525,9 @@ class MasterServer(object):
             return False
         else:
             worker.set_status("updated")
+            self.__sync_slots_used = self.__sync_slots_used - 1
+            if self.__sync_slots_used < 0:
+                self.__sync_slots_used = 0
             worker.set_last_sync(time())
             os.remove(file_path)
 

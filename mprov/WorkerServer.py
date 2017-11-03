@@ -296,7 +296,8 @@ class WorkerServer(object):
                 self.__master_connection.close()
                 self.__master_connection = None
         except Exception as e:
-            self.__master_connection.close()
+            if self.__master_connection is not None:
+                self.__master_connection.close()
             self.__master_connection = None
             utils.print_err("Error: Problem communicating with master server. Will Retry")
         # set this function up as a re-occuring timer based on the -b/--heartbeat option.
