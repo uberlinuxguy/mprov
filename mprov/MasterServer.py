@@ -394,14 +394,19 @@ class MasterServer(object):
                         packet = utils.parse_packet(sock.recv(1024))  # type: dict
                         # then decrement it after it's over.
                         worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
-                        if "ok" not in packet:
-                            worker.set_status("error")
-                            sock.close()
+                        if packet is None:
+                            utils.print_err("Error: empty packet from " + worker_sync.get_ip())
 
-                        # status is updated from an updated worker, set to upadted
-                        worker.set_status("updated")
-                        worker.set_last_sync(time())
-                        return True
+                        else:
+                            if "ok" not in packet:
+                                worker.set_status("error")
+                                sock.close()
+                                return False
+
+                            # status is updated from an updated worker, set to upadted
+                            worker.set_status("updated")
+                            worker.set_last_sync(time())
+                            return True
                     except Exception as e:
                         utils.print_err("Error: worker to worker sync failed")
                         utils.print_err(e)
