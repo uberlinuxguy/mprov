@@ -333,8 +333,8 @@ class MasterServer(object):
         for worker in self.workers:  # type: MasterServerWorkerEntry
             if worker.get_status() != "syncing":
                 if worker.get_status() != "error":
-                    worker.set_status("syncing")
-                    threading.Thread(target=self._sync_worker, args=(worker,)).start()
+                    if worker.get_status() != "waiting":
+                        threading.Thread(target=self._sync_worker, args=(worker,)).start()
 
     def _sync_worker(self, worker):
         """
@@ -358,11 +358,10 @@ class MasterServer(object):
         #if worker.get_name() == socket.gethostname():
         #    force_master_sync = True
 
-        worker.set_status("syncing")
-
         # if the master is full.
 
         while not force_master_sync:
+            worker.set_status("waiting")
             # only try to send us to a worker if we aren't being forced to a master sync
             # if we are not forcing a master sync,
             # attempt to hand off the client to a worker
@@ -375,10 +374,7 @@ class MasterServer(object):
                 if worker_sync.get_uuid() == worker.get_uuid():
                     worker_sync = None
                     worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
-                    # if we are alone and no one is syncing to the master, let us do it.
-                    if self.__sync_slots_used < self.__sync_slots:
-                        self.__sync_slots_used = self.__sync_slots_used + 1
-                        force_master_sync = True
+
                 else:
                     # we have a valid, updated worker, try a sync
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -389,14 +385,14 @@ class MasterServer(object):
                         # connect to the recipient worker and tell it to sync FROM worker_sync
                         sock.connect(worker_address)
                         # increment the worker's in use counter.
-
+                        worker.set_status("syncing")
                         sock.sendall("sync master worker=" + worker_sync.get_ip())
                         packet = utils.parse_packet(sock.recv(1024))  # type: dict
                         # then decrement it after it's over.
                         worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
                         if packet is None:
                             utils.print_err("Error: empty packet from " + worker_sync.get_ip())
-
+                            worker.set_status("waiting")
                         else:
                             if "ok" not in packet:
                                 worker.set_status("error")
@@ -408,6 +404,7 @@ class MasterServer(object):
                             worker.set_last_sync(time())
                             return True
                     except Exception as e:
+                        worker.set_status("error")
                         utils.print_err("Error: worker to worker sync failed")
                         utils.print_err(e)
                         sock.close()
@@ -425,6 +422,7 @@ class MasterServer(object):
 
         # connect to the worker and wait for it to reply that it's ready.
         # create a new socket for the worker connection.
+        worker.set_status("syncing")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         worker_address = (worker.get_ip(), 4018)
 
