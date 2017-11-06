@@ -33,6 +33,8 @@ mkdir -p %{buildroot}/etc/sysconfig/
 cp service-files/mprov %{buildroot}/etc/sysconfig/
 mkdir -p %{buildroot}/usr/sbin/
 cp bin/mprovcmd %{buildroot}/usr/sbin/mprovcmd
+mkdir -p %{buildroot}/etc/firewalld/services/
+cp mprov.xml %{buildroot}/usr/lib/firewalld/services/
 
 %post
 /usr/bin/systemctl daemon-reload
@@ -46,6 +48,7 @@ cp bin/mprovcmd %{buildroot}/usr/sbin/mprovcmd
 /usr/lib/systemd/system/*
 %config /etc/sysconfig/mprov
 %attr(0700, root, root) /usr/sbin/mprovcmd
+/usr/lib/firewalld/services/mprov.xml
 
 
 %changelog
