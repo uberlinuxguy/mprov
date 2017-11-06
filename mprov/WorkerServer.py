@@ -431,7 +431,7 @@ class WorkerServer(object):
         # parse the "ok" packet
         rsync_uuid = packet_client["client_uuid"]
         sync_port = packet_client["port"]
-        mod_name =  packet_client["module"]
+        mod_name = packet_client["module"]
 
         if rsync_uuid != cli_req.get_client_uuid():
             utils.print_err("Error: request ID mismatch!")
@@ -480,7 +480,9 @@ class WorkerServer(object):
         return_code = rsync_proc.returncode
         if return_code != 0 and return_code != 24:
             utils.print_err("Error: Client rsync died prematurely! RC=" + str(return_code))
+            connection.send("ok result=error")
         else:
+            connection.send("ok result=pass")
             os.remove(file_path)
 
         # mark the sync as done.
@@ -502,7 +504,7 @@ class WorkerServer(object):
         while cli_req.is_sync_active():
             try:
                 packet = utils.parse_packet(connection.recv(10))
-                if  "ok" not in packet:
+                if "ok" not in packet:
                     # something went wrong on teh client side.
                     # Clean up the request and remove it.
                     connection.sendall("err")

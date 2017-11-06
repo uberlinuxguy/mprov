@@ -16,6 +16,10 @@ from mprov import utils
 
 class Client(object):
     __retries = 0
+    __sync_result = "error"
+    __sync_thread = None  # type: threading.Thread
+    __ctrl_thread = None  # type: threading.Thread
+    __hb_timer = None  # type: threading.Timer
 
     def signal_handler(self, signum, frame):
         self.__exiting = True
@@ -61,9 +65,28 @@ class Client(object):
         except Exception as e:
             utils.print_err("Error: Master Connection failed. ")
             utils.print_err("Error: " + e.message)
-            return
+            return 1
 
+        # start the process with a call to register.
+        # this sets up the timer functions and threads.
         self._register_with_master()
+
+        # wait a couple of seconds for the register to finish and the threads to spawn.
+        #sleep(10)
+
+        # wait on the sync thread.
+#        if self.__sync_thread is not None:
+        self.__sync_thread.join()
+
+        # wait on the control thread.
+ #       if self.__ctrl_thread is not None:
+        self.__ctrl_thread.join()
+
+        # exit now and return the status.
+        if self.__sync_result == "pass":
+            return 0
+        else:
+            return 1
 
     def _register_with_master(self):
         if self.__exiting:
@@ -122,7 +145,9 @@ class Client(object):
                 if not self.__syncing:
                     self.__syncing = True
                     # now let's start the thread to talk to the worker.
-                    threading.Thread(target=self._handle_sync, args=(worker_ip,)).start()
+                    self.__sync_thread = threading.Thread(target=self._handle_sync, args=(worker_ip,))
+                    if self.__sync_thread is not None:
+                        self.__sync_thread.start()
 
             # set this function up as a re-occuring timer based on the -b/--heartbeat option.
             self.__hb_timer = threading.Timer(self.__hb_timer_interval, self._register_with_master)
@@ -223,7 +248,9 @@ class Client(object):
 
         # worker is connected
         # Establish a control connection in a separate thread
-        threading.Thread(target=self._worker_control, args=(worker_address,)).start()
+        self.__ctrl_thread = threading.Thread(target=self._worker_control, args=(worker_address,))
+        if self.__ctrl_thread is not None:
+            self.__ctrl_thread.start()
 
         # generate the module_name
         module_name = str(uuid.uuid4())
@@ -270,8 +297,33 @@ class Client(object):
         os.remove(secrets_path)
         os.remove(rsyncd_path)
 
+        #wait for the return packet to tell us if the sync was successful.
+        try:
+            res_packet = utils.parse_packet(sock.recv(1024))
+            if res_packet is not None:
+                if "ok" in res_packet:
+                    if "result" in res_packet:
+                        if res_packet['result'] == "error":
+                            print "Worker Sync Failed! (Err: 101)"
+                            self.__sync_result = 'error'
+                        elif res_packet['result'] == "pass":
+                            print "Worker Sync Complete"
+                            self.__sync_result = 'pass'
+                    else:
+                        print "Worker Sync Failed! (Err: 102)"
+                        self.__sync_result = 'error'
+                else:
+                    print "Worker Sync Failed! (Err: 103)"
+                    self.__sync_result = 'error'
+            else:
+                print "Worker Sync Failed! (Err: 104)"
+                self.__sync_result = 'error'
+        except socket.timeout:
+            utils.print_err("Error: worker control comms. timeout.")
+            print "Worker Sync Failed! (Err: 105)"
+            self.__sync_result = 'error'
+
         sock.close()
-        print "Worker Sync Complete."
 
         if self.__master_connection is None:
             self.__master_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -315,7 +367,10 @@ class Client(object):
         # cancel the rsync.
         if self.__rsyncd_pid > 0:
             # attempt to terminate the rsyncd process
-            os.kill(self.__rsyncd_pid, signal.SIGTERM)
+            try:
+                os.kill(self.__rsyncd_pid, signal.SIGTERM)
+            except OSError:
+                return
 
     def _notify_master_error(self, worker_ip):
         if self.__master_connection is None:
@@ -347,7 +402,7 @@ class Client(object):
                 cmd_send = cmd_send + " uuid=" + self.__req_uuid
             cmd_send = cmd_send + " state=done"
             cmd_send += "\n"
-            utils.print_err("Sending to master: " + cmd_send)
+            #utils.print_err("Sending to master: " + cmd_send)
             self.__master_connection.send(cmd_send)
             self.__master_connection.recv(1024)
         else:

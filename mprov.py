@@ -35,6 +35,7 @@ if __name__ == "__main__":
         exit(1)
 
     ''' hand off to the program the user wants. '''
-    program.run()
+
     signal.signal(signal.SIGINT, program.signal_handler)
-    exit(0)
+    return_code = program.run()
+    exit(return_code)
