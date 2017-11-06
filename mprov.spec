@@ -33,7 +33,7 @@ mkdir -p %{buildroot}/etc/sysconfig/
 cp service-files/mprov %{buildroot}/etc/sysconfig/
 mkdir -p %{buildroot}/usr/sbin/
 cp bin/mprovcmd %{buildroot}/usr/sbin/mprovcmd
-mkdir -p %{buildroot}/etc/firewalld/services/
+mkdir -p %{buildroot}/usr/lib/firewalld/services/
 cp mprov.xml %{buildroot}/usr/lib/firewalld/services/
 
 %post
