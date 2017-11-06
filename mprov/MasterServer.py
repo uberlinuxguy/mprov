@@ -99,7 +99,7 @@ class MasterServer(object):
         """
         size = 1024
         while True:
-            # try:
+            try:
                 packet = utils.parse_packet(client.recv(size))
                 if packet is not None:
 
@@ -134,10 +134,10 @@ class MasterServer(object):
                 else:
                     client.close()
                     return False
-            #except Exception as e:
+            except socket.timeout:
             #    print e
-            #    client.close()
-            #    return False
+                client.close()
+                return False
 
     def _handle_worker_req(self, client, address, data):
         """
@@ -155,13 +155,26 @@ class MasterServer(object):
 
         # look for this worker already in the list, and just update it's hb entry.
         for worker in self.workers:  # type: MasterServerWorkerEntry
+            # check for the UUID.
             if worker_obj.get_uuid() == worker.get_uuid():
+
+                # if the worker is in the list, but it's errored,
+                # and it has sent us a heartbeat, it's up, so try a
+                # sync again.
                 if worker.get_status() == "error":
                     threading.Thread(target=self._sync_worker, args=(worker,))
                 worker.set_last_hb(time())
                 # print "Worker: " + worker.get_name() + ": hb."
                 client.sendall("ok")
                 return
+            else:
+                if (worker_obj.get_name() == worker.get_name()) and \
+                        (worker_obj.get_ip() == worker.get_ip()) :
+                    # the name and ip seem the same as a worker already in memory.
+                    # remove that worker
+                    self.workers.remove(worker)
+                    # break out of the for loop and tread this as a new worker.
+                    break
 
         # worker was not found in the existing entries, so create a new one
         worker_obj.set_last_sync(0)
@@ -374,6 +387,10 @@ class MasterServer(object):
                 if worker_sync.get_uuid() == worker.get_uuid():
                     worker_sync = None
                     worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
+                    # if we are alone and no one is syncing to the master, let us do it.
+                    if self.__sync_slots_used < self.__sync_slots:
+                        self.__sync_slots_used = self.__sync_slots_used + 1
+                        force_master_sync = True
 
                 else:
                     # we have a valid, updated worker, try a sync
@@ -433,10 +450,12 @@ class MasterServer(object):
             sock.sendall("sync master")
             packet = utils.parse_packet(sock.recv(1024))  # type: dict
             if "ok" not in packet:
+                self.__sync_slots_used = self.__sync_slots_used - 1
                 worker.set_status("error")
                 sock.close()
                 return False
         except Exception as e:
+            self.__sync_slots_used = self.__sync_slots_used - 1
             utils.print_err("Error: Unable to talk to worker at " + worker_address[0] + ": " + e.message)
             sock.close()
             worker.set_status("error")
@@ -450,11 +469,13 @@ class MasterServer(object):
 
         # double check the worker's supplied params.
         if worker_uuid == "":
+            self.__sync_slots_used = self.__sync_slots_used - 1
             worker.set_status("error")
             sock.close()
             return False
 
         if port == "":
+            self.__sync_slots_used = self.__sync_slots_used - 1
             worker.set_status("error")
             sock.close()
             return False
@@ -518,6 +539,8 @@ class MasterServer(object):
             sock2.sendall("stop master")
         except Exception as e:
             print e
+            self.__sync_slots_used = self.__sync_slots_used - 1
+            worker.set_status("error")
             sock2.close()
             return False
 
@@ -528,6 +551,7 @@ class MasterServer(object):
             utils.print_err("Error: rsync returned '" + str(return_code) + "'")
             utils.print_err("Error: marking worker as status 'error'")
             worker.set_status("error")
+            self.__sync_slots_used = self.__sync_slots_used - 1
             return False
         else:
             worker.set_status("updated")
@@ -659,6 +683,8 @@ class MasterServerWorkerEntry(object):
     def set_last_hb(self, last_hb):
         self.__last_hb = last_hb
 
+    def set_uuid(self, uuid):
+        self.__UUID = uuid
 
 class MasterServerClientRequest(object):
 
