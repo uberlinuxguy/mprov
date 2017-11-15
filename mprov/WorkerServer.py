@@ -125,7 +125,7 @@ class WorkerServer(object):
                     elif "stop" in packet:
                         if "master" in packet:
                             if address[0] != self.__last_master_sync_ip:
-                                utils.print_err("Error: stop command came from unexpected place!")
+                                utils.print_err("Error: stop command came from unexpected place: " + address[0])
                                 utils.print_err("Error: this is probably bad.")
                                 connection.close()
                                 return False
@@ -168,7 +168,7 @@ class WorkerServer(object):
         # let the master server redirect us to another worker that has an updated
         # copy of the image repo
 
-        print "Master Sync"
+        print "Repository Sync"
 
         sync_connection = None
 

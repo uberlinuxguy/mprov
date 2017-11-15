@@ -4,4 +4,6 @@
   <description>mprov is used as a MultiPROVisioner.  http://github.com/uberlinuxguy/mprov/</description>
   <port protocol="tcp" port="4017"/>
   <port protocol="tcp" port="4018"/>
+  <port protocol="tcp" port="8970"/>
+  <port protocol="tcp" port="8971"/>
 </service>

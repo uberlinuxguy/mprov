@@ -71,8 +71,9 @@ class Client(object):
         # this sets up the timer functions and threads.
         self._register_with_master()
 
-        # wait a couple of seconds for the register to finish and the threads to spawn.
-        #sleep(10)
+        # wait for the sync to start.
+        while not self.__syncing:
+            sleep(5)
 
         # wait on the sync thread.
 #        if self.__sync_thread is not None:
@@ -127,8 +128,11 @@ class Client(object):
                 self.__master_connection = None
 
             if "ok" not in packet:
-                utils.print_err("Error: Master Server responded poorly to our register request. Will retry.")
-                utils.print_err("Error: Master Server Said: '" + packet["raw_packet"] + "'")
+                if "err" in packet:
+                    utils.print_err("No worker found, waiting for more workers...")
+                else:
+                    utils.print_err("Error: Master Server responded poorly to our register request. Will retry.")
+                    utils.print_err("Error: Master Server Said: '" + packet["raw_packet"] + "'")
                 self.__master_connection.close()
                 self.__master_connection = None
             else:
@@ -154,7 +158,8 @@ class Client(object):
             self.__hb_timer.start()
 
         except Exception as e:
-            self.__master_connection.close()
+            if self.__master_connection is not None:
+                self.__master_connection.close()
             self.__master_connection = None
             utils.print_err("Error: Problem communicating with master server. Will Retry")
 
@@ -243,7 +248,7 @@ class Client(object):
             utils.print_err("Error: Exception in worker comms: " + e.message)
             self.__syncing = False
             self.__retries += 1
-            self.__notify_master_error(worker_ip)
+            self._notify_master_error(worker_ip)
             return False
 
         # worker is connected

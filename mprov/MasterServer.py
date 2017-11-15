@@ -15,6 +15,7 @@ import subprocess
 
 
 class MasterServer(object):
+    __UUID = ""
     __config = None  # type: Config
     __sync_timer_interval = 0
     __purge_timer_interval = 0
@@ -36,6 +37,7 @@ class MasterServer(object):
         :param config: an mprov Config object.
         :type config: mprov.Config.Config
         """
+        self.__UUID =  str(uuid.uuid4())
         self.__path = config.get_conf_val("path")
         self.__config = config
         if not os.path.exists(self.__path):
@@ -360,19 +362,7 @@ class MasterServer(object):
 
         force_master_sync = False
 
-        if worker.get_status() == "pending":
-            # worker was synced by another worker, so
-            # force a sync from us just to make sure we have
-            # valid copy.
-            self.__sync_slots_used = self.__sync_slots_used + 1
-            force_master_sync = True
-
-        # if this worker is local only sync to master.
-        #if worker.get_name() == socket.gethostname():
-        #    force_master_sync = True
-
-        # if the master is full.
-
+        # attempt to sync to a worker.  As a last result, try to sync from master.
         while not force_master_sync:
             worker.set_status("waiting")
             # only try to send us to a worker if we aren't being forced to a master sync
@@ -387,13 +377,14 @@ class MasterServer(object):
                 if worker_sync.get_uuid() == worker.get_uuid():
                     worker_sync = None
                     worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
-                    # if we are alone and no one is syncing to the master, let us do it.
+                    # if we are alone, no one is syncing to the master, let us do it.
                     if self.__sync_slots_used < self.__sync_slots:
                         self.__sync_slots_used = self.__sync_slots_used + 1
                         force_master_sync = True
 
                 else:
                     # we have a valid, updated worker, try a sync
+                    worker.set_sync_src_uuid(worker_sync.get_uuid())
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
                     try:
@@ -439,6 +430,7 @@ class MasterServer(object):
 
         # connect to the worker and wait for it to reply that it's ready.
         # create a new socket for the worker connection.
+        worker.set_sync_src_uuid(self.__UUID)
         worker.set_status("syncing")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         worker_address = (worker.get_ip(), 4018)
@@ -589,6 +581,7 @@ class MasterServer(object):
             curr_time = time()
             w_hb = worker.get_last_hb()
             time_check = curr_time - self.__purge_timer_interval
+            print "Worker: " + worker.get_uuid() + " last_hb: " + str(w_hb) + "; time_check: " + str(time_check)
 
             # if we haven't heard from this worker in a while, remove it.
             if w_hb <= time_check:
@@ -636,6 +629,7 @@ class MasterServerWorkerEntry(object):
     __status = "inactive"
     __ip = ""
     __last_hb = 0
+    __sync_src_uuid = ""
 
     def __init__(self, info):
         packet = utils.parse_packet(info)
@@ -685,6 +679,12 @@ class MasterServerWorkerEntry(object):
 
     def set_uuid(self, uuid):
         self.__UUID = uuid
+
+    def set_sync_src_uuid(self, src_uuid):
+        self.__sync_src_uuid = src_uuid
+
+    def get_sync_src_uuid(self):
+        return self.__sync_src_uuid
 
 class MasterServerClientRequest(object):
 
