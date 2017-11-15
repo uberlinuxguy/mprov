@@ -599,6 +599,7 @@ class WorkerServer(object):
 
         rsync_args = ["/usr/bin/rsync",
                       "-av",
+                      "--delete",
                       "--progress",
                       "--port=" + sync_port,
                       "--password-file=" + file_path,

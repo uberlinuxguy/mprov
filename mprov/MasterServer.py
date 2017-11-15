@@ -104,8 +104,9 @@ class MasterServer(object):
             try:
                 packet = utils.parse_packet(client.recv(size))
                 if packet is not None:
-
-                    if "worker" in packet:
+                    if "execmd" in packet:
+                        self._handle_cmd(client, address, packet["raw_packet"])
+                    elif "worker" in packet:
                         self._handle_worker_req(client, address, packet["raw_packet"])
                     elif "client" in packet:
                         if "worker_state" in packet:
@@ -122,8 +123,6 @@ class MasterServer(object):
                                 else:
                                     utils.print_err("Error: unknown request attempted to report worker error")
                         self._handle_client_req(client, address, packet["raw_packet"])
-                    elif "execmd" in packet:
-                        self._handle_cmd(client, address, packet["raw_packet"])
                     elif "verify" in packet:
                         req_uuid = packet["uuid"]
                         client_req = self._find_req_by_uuid(req_uuid)  # type: MasterServerClientRequest
@@ -206,6 +205,11 @@ class MasterServer(object):
             if client_obj.get_uuid() == m_client.get_uuid():
                 m_client.set_last_hb(time())
                 tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())
+                if tmp_worker is None:
+                    utils.print_err("Error: unable to get worker by uuid for client. Worker UUID: " +
+                                    m_client.get_worker_uuid())
+                    utils.print_err("Error: Purging client.")
+                    self.client_requests.remove(m_client)
 
                 if client_obj.get_done() == "done":
                     tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
@@ -340,16 +344,13 @@ class MasterServer(object):
         print "Worker Sync Started."
         # first invalidate all the workers.
         for worker in self.workers:
-            if worker.get_status() != "syncing":
-                if worker.get_status() != "error":
-                    worker.set_status("outdated")
+            if worker.get_status() == "updated":
+                worker.set_status("outdated")
 
         # now step through the remaining workers and sync anyone that isn't syncing.
         for worker in self.workers:  # type: MasterServerWorkerEntry
-            if worker.get_status() != "syncing":
-                if worker.get_status() != "error":
-                    if worker.get_status() != "waiting":
-                        threading.Thread(target=self._sync_worker, args=(worker,)).start()
+            if worker.get_status() == "outdated":
+                threading.Thread(target=self._sync_worker, args=(worker,)).start()
 
     def _sync_worker(self, worker):
         """
@@ -496,6 +497,7 @@ class MasterServer(object):
 
         rsync_args=["/usr/bin/rsync",
                     "-av",
+                    "--delete",
                     "--progress",
                     "--password-file=" + file_path,
                     "--port=" + port,
