@@ -439,7 +439,7 @@ class MasterServer(object):
 
         try:
             sock.connect(worker_address)
-            sock.sendall("sync master")
+            sock.sendall("sync master repo_uuid=" + self.__UUID)
             packet = utils.parse_packet(sock.recv(1024))  # type: dict
             if "ok" not in packet:
                 self.__sync_slots_used = self.__sync_slots_used - 1
@@ -528,7 +528,7 @@ class MasterServer(object):
             sock2.connect(worker_address)
 
             # send it the signal to shut-down.
-            sock2.sendall("stop master")
+            sock2.sendall("stop master repo_uuid=" + self.__UUID)
         except Exception as e:
             print e
             self.__sync_slots_used = self.__sync_slots_used - 1

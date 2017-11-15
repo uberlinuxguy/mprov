@@ -27,6 +27,7 @@ class WorkerServer(object):
     __hb_timer = None  # type: threading.Timer
     __master_connection = None  # type: socket.socket
     __last_master_sync_ip = None
+    __repo_sync_uuid = ""
 
     def signal_handler(self, signum, frame):
         self.__exiting = True
@@ -124,12 +125,20 @@ class WorkerServer(object):
                             self._handle_worker_sync(connection, address)
                     elif "stop" in packet:
                         if "master" in packet:
-                            if address[0] != self.__last_master_sync_ip:
-                                utils.print_err("Error: stop command came from unexpected place: " + address[0])
-                                utils.print_err("Error: this is probably bad.")
-                                connection.close()
-                                return False
-                            self._handle_stop_master_sync(connection, address)
+                            if "repo_uuid" in packet:
+                                if packet["repo_uuid"] == self.__repo_sync_uuid:
+                                    # we are getting a stop from where we expect.
+                                    self._handle_stop_master_sync(connection, address)
+                                    return True
+                                else:
+                                    utils.print_err("Error: stop command unknown repo_uuid: " + packet["repo_uuid"])
+                            else:
+                                utils.print_err("Error: stop command from source with no UUID.")
+                            utils.print_err("Error: should be: " + self.__repo_sync_uuid)
+                            utils.print_err("Error: this is probably bad.")
+                            connection.close()
+                            return False
+
                         elif "client"in packet:
                             # purge a stale client request, kill any rsyncs running, and open the slot.
                             if address[0] == self.__config.get_conf_val("ms"):
@@ -171,6 +180,8 @@ class WorkerServer(object):
         print "Repository Sync"
 
         sync_connection = None
+        if "repo_uuid" in packet:
+            self.__repo_sync_uuid = packet["repo_uuid"]
 
         # if the master server is sending us a worker to sync from, then connect to the worker.
         if "worker" in packet:
@@ -188,6 +199,8 @@ class WorkerServer(object):
                     sync_connection.close()
                     connection.close()
                     return
+                if "repo_uuid" in packet_reply:
+                    self.__repo_sync_uuid=packet_reply["repo_uuid"]
 
             except Exception as e:
                 utils.print_err("Error in worker to worker sync.")
@@ -537,7 +550,7 @@ class WorkerServer(object):
         print "Worker to worker sync requested from: " + address[0]
 
         # tell the other end to proceed.
-        connection.send("ok\n")
+        connection.send("ok repo_uuid=" + self.__my_uuid)
 
         # now we wait for the worker to tell us it's ready.
         connection.settimeout(60)
@@ -629,7 +642,7 @@ class WorkerServer(object):
             sock2.connect(worker_address)
 
             # send it the signal to shut-down.
-            sock2.sendall("stop master")
+            sock2.sendall("stop master repo_uuid=" + self.__my_uuid)
         except Exception as e:
             print e
             sock2.close()
