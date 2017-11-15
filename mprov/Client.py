@@ -63,7 +63,7 @@ class Client(object):
         try:
             self.__master_connection.connect(master_address)
         except Exception as e:
-            utils.print_err("Error: Master Connection failed. ")
+            utils.print_err("Error: Master Connection failed in run(). ")
             utils.print_err("Error: " + e.message)
             return 1
 
@@ -103,8 +103,9 @@ class Client(object):
             try:
                 self.__master_connection.connect(master_address)
             except Exception as e:
-                utils.print_err("Error: Master Connection failed. ")
+                utils.print_err("Error: Master Connection failed in _register_with_master(). ")
                 utils.print_err("Error: " + e.message)
+                self._restart_reg_timer()
                 return
 
         try:
@@ -142,6 +143,7 @@ class Client(object):
                 worker_ip = packet["worker_ip"]
                 if worker_ip is None:
                     # we don't have a worker.  So exit.
+                    self._restart_reg_timer()
                     return
 
                 # thread off to connect to the worker and start the sync
@@ -154,14 +156,18 @@ class Client(object):
                         self.__sync_thread.start()
 
             # set this function up as a re-occuring timer based on the -b/--heartbeat option.
-            self.__hb_timer = threading.Timer(self.__hb_timer_interval, self._register_with_master)
-            self.__hb_timer.start()
+            self._restart_reg_timer()
 
         except Exception as e:
             if self.__master_connection is not None:
                 self.__master_connection.close()
             self.__master_connection = None
             utils.print_err("Error: Problem communicating with master server. Will Retry")
+            self._restart_reg_timer()
+
+    def _restart_reg_timer(self):
+        self.__hb_timer = threading.Timer(self.__hb_timer_interval, self._register_with_master)
+        self.__hb_timer.start()
 
     def _worker_control(self, worker_address):
         # Establish a control connection in a separate thread
@@ -341,7 +347,7 @@ class Client(object):
                 self.__master_connection.connect(master_address)
 
             except Exception as e:
-                utils.print_err("Error: Master Connection failed. ")
+                utils.print_err("Error: Master Connection failed in _handle_sync() ")
                 utils.print_err("Error: " + e.message)
 
         if self.__master_connection is not None:
@@ -389,7 +395,7 @@ class Client(object):
                 self.__master_connection.connect(master_address)
 
             except Exception as e:
-                utils.print_err("Error: Master Connection failed. ")
+                utils.print_err("Error: Master Connection failed in _notify_master_error() ")
                 utils.print_err("Error: " + e.message)
 
         if self.__master_connection is not None:
