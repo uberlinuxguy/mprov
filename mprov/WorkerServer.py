@@ -251,9 +251,17 @@ class WorkerServer(object):
 
         rsyncd_proc.communicate()
 
+        reply="ok"
+        # check the return code here!
+        if rsyncd_proc.returncode != 0 and rsyncd_proc.returncode != 24:
+            utils.print_err("Error: rsync from " + sync_connection.getpeername()[0] + " died unexpectedly with RC=" +
+                            rsyncd_proc.returncode + "!!!")
+            reply="err"
+
+
         # if we used a different connection for the sync, then tell the master we are done.
         if sync_connection != connection:
-            connection.send("ok\n")
+            connection.send(reply)
             connection.close()
         # clean up the tmp files.
         os.remove(rsyncd_path)
@@ -628,7 +636,7 @@ class WorkerServer(object):
         # examine return code and log.... something...
         return_code = rsync_proc.returncode
         if return_code != 0 and return_code != 24:
-            utils.print_err("Error: Worker rsync died prematurely! RC=" + str(return_code))
+            utils.print_err("Error: Worker rsync to " + address[0] + " died prematurely! RC=" + str(return_code))
         else:
             os.remove(file_path)
 
