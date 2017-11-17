@@ -253,9 +253,10 @@ class WorkerServer(object):
 
         reply="ok"
         # check the return code here!
-        if rsyncd_proc.returncode != 0 and rsyncd_proc.returncode != 24:
+        if rsyncd_proc.returncode != 0 and rsyncd_proc.returncode != 24 \
+                and rsyncd_proc.returncode != 20:
             utils.print_err("Error: rsync from " + sync_connection.getpeername()[0] + " died unexpectedly with RC=" +
-                            rsyncd_proc.returncode + "!!!")
+                            str(rsyncd_proc.returncode) + "!!!")
             reply="err"
 
 
