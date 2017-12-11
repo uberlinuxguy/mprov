@@ -662,7 +662,6 @@ class MasterServer(object):
                 self.client_requests.remove(m_client)
                 tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())  # type: MasterServerWorkerEntry
                 tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
-                return
         self.__master_data_lock.release()
 
     def _find_req_by_uuid(self, req_uuid):
