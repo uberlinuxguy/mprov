@@ -242,7 +242,7 @@ class WorkerServer(object):
                                         "--daemon",
                                         "--port=" + sync_port,
                                         "--no-detach",
-                                        "-vx",
+                                        "-v",
                                         "-4",
                                         "--config=" + rsyncd_path], shell=False)
         self.__rsyncd_pid = rsyncd_proc.pid
@@ -472,7 +472,7 @@ class WorkerServer(object):
         os.close(fd)
 
         rsync_args = ["/usr/bin/rsync",
-                      "-av",
+                      "-avx",
                       "--progress",
                       "--port=" + sync_port,
                       "--password-file=" + file_path,
