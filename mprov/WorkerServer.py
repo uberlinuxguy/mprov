@@ -242,7 +242,7 @@ class WorkerServer(object):
                                         "--daemon",
                                         "--port=" + sync_port,
                                         "--no-detach",
-                                        "-v",
+                                        "-vx",
                                         "-4",
                                         "--config=" + rsyncd_path], shell=False)
         self.__rsyncd_pid = rsyncd_proc.pid

@@ -297,6 +297,7 @@ class Client(object):
                                         "--no-detach",
                                         "-v",
                                         "-4",
+                                        "-x"
                                         "--config=" + rsyncd_path], shell=False)
         self.__rsyncd_pid = rsyncd_proc.pid
 

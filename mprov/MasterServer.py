@@ -539,7 +539,7 @@ class MasterServer(object):
         rsync_log = open("/tmp/mprov/master_sync_" + rsync_mod + ".log", "w+")
 
         rsync_args=["/usr/bin/rsync",
-                    "-av",
+                    "-avx",
                     "--delete",
                     "--progress",
                     "--password-file=" + file_path,
