@@ -607,7 +607,7 @@ class WorkerServer(object):
         os.close(fd)
 
         rsync_args = ["/usr/bin/rsync",
-                      "-av",
+                      "-avx",
                       "--delete",
                       "--progress",
                       "--port=" + sync_port,
