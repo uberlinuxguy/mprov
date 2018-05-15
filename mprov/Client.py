@@ -76,12 +76,12 @@ class Client(object):
             sleep(5)
 
         # wait on the sync thread.
-#        if self.__sync_thread is not None:
-        self.__sync_thread.join()
+        if self.__sync_thread is not None:
+            self.__sync_thread.join()
 
         # wait on the control thread.
- #       if self.__ctrl_thread is not None:
-        self.__ctrl_thread.join()
+        if self.__ctrl_thread is not None:
+            self.__ctrl_thread.join()
 
         # exit now and return the status.
         if self.__sync_result == "pass":
@@ -254,6 +254,7 @@ class Client(object):
             utils.print_err("Error: Exception in worker comms: " + e.message)
             self.__syncing = False
             self.__retries += 1
+            utils.print_err(("Error: Sending master worker IP: " + worker_ip))
             self._notify_master_error(worker_ip)
             return False
 

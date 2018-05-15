@@ -14,7 +14,7 @@ MPROV_MASTER_SERVER=master
 # after this time lapses, any inactive worker or client will be
 # removed from the nodes the master server knows about.
 # it will take the 'm' suffix to denote minutes.
-MPROV_MASTER_PURGE="-u 5m"
+MPROV_MASTER_PURGE="-u 10"
 
 # REQUIRED:
 # this will set the path that the master node will sync out to all the
