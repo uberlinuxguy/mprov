@@ -542,6 +542,7 @@ class MasterServer(object):
                     "-avx",
                     "--delete",
                     "--progress",
+                    "--exclude=/tmp",
                     "--password-file=" + file_path,
                     "--port=" + port,
                     self.__path + "/",

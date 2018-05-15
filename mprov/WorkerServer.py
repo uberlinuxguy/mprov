@@ -475,6 +475,7 @@ class WorkerServer(object):
                       "-avx",
                       "--progress",
                       "--port=" + sync_port,
+                      "--exclude=/tmp",
                       "--password-file=" + file_path,
                       self.__path + "/" + cli_req.get_req_mod() + "/",
                       "root@" + address[0] + "::" + mod_name ]
@@ -610,6 +611,7 @@ class WorkerServer(object):
                       "-avx",
                       "--delete",
                       "--progress",
+                      "--exclude=/tmp",
                       "--port=" + sync_port,
                       "--password-file=" + file_path,
                       self.__path + "/",
