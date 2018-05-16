@@ -1,0 +1,138 @@
+#!/bin/bash
+## linuxrc
+#
+# 	Author: Jason Williams <jasonw@jhu.edu>
+#
+#
+# 	This is a scipt used in an initramfs.  It's used
+#	to do the mprov sync to the tmpfs root
+# 	and then switch_root to the new filesystem. 
+#
+# kernel param: mprov_image - the image to sync
+# kernel param: mprov_master - the master server to talk to.
+# kernel param: mprov_root_size - the size for the root tmpfs
+#
+
+# set the size for the tmpfs root ram disk.
+# kernel param: mprov_root_size
+ROOT_SIZE=8g
+
+#clear the screen and set up our path.
+clear
+export PATH="/bin:/sbin:/usr/bin:/usr/sbin"
+
+# mount /proc
+mount -t proc proc /proc
+mount -t devtmpfs devtmpfs /dev
+mount -t tmpfs tmpfs /run
+mount -t sysfs sysfs /sys
+
+
+# dirty, dirty hack to load the net drivers
+# make sure you include them in your dracut image.
+KERN_VER=`uname -r`
+for i in `find /lib/modules/$KERN_VER/kernel/drivers/net/ -name "*.ko*" | awk -F/ '{print $NF'} | sed -e 's/.ko.xz//'`
+do
+modprobe $i
+done
+
+# we should now have an interface, so let's run dhclient
+dhclient
+
+clear
+
+# grab the kernel command line parameters
+k_ROOT_SIZE=""
+for i in  `cat /proc/cmdline`
+do
+	tmp_str=`echo $i | grep mprov_root_size`
+	if [ "$tmp_str" != "" ]
+	then
+		k_ROOT_SIZE=`echo $tmp_str | awk -F= '{print $NF}'`
+	fi
+done
+if [ "$k_ROOT_SIZE" != "" ]
+then
+	ROOT_SIZE=$k_ROOT_SIZE
+fi
+
+k_MPROV_MASTER=""
+for i in  `cat /proc/cmdline`
+do
+	tmp_str=`echo $i | grep mprov_master`
+	if [ "$tmp_str" != "" ]
+	then
+		k_MPROV_MASTER=`echo $tmp_str | awk -F= '{print $NF}'`
+	fi
+done
+
+if [ "$k_MPROV_MASTER" == "" ]
+then
+	echo "Error: You MUST specify 'mprov_master=<some ip or address>' on the kernel cmdline." 
+	exec /bin/bash
+fi
+MPROV_MASTER=$k_MPROV_MASTER
+
+k_MPROV_IMAGE=""
+for i in  `cat /proc/cmdline`
+do
+	tmp_str=`echo $i | grep mprov_image`
+	if [ "$tmp_str" != "" ]
+	then
+		k_MPROV_IMAGE=`echo $tmp_str | awk -F= '{print $NF}'`
+	fi
+done
+if [ "$k_MPROV_IMAGE" == "" ]
+then
+	echo "Error: You MUST specify 'mprov_image=<some name> on the kernel cmdline."
+	exec /bin/bash
+fi
+MPROV_IMAGE=$k_MPROV_IMAGE
+
+# create and mount a tmpfs RAM backed filesystem.
+echo -n "Mounting tmpfs for new RAM root of size ${ROOT_SIZE}... "
+mkdir -p /tmpfs
+mount -t tmpfs -o size=${ROOT_SIZE} none /tmpfs
+echo "DONE"
+mkdir /tmpfs/tmp
+date > /tmpfs/tmp/boot1
+
+source /etc/sysconfig/mprov
+/usr/bin/mprov -c --ms $MPROV_MASTER -p /tmpfs/ -i $MPROV_IMAGE
+
+#echo "Copy the linuxrc.switchroot"
+#cp /linuxrc.switchroot /tmpfs/ 
+
+echo "Attempting to switch_root to /tmpfs... "
+
+# create a place to hold the NFS root we are booted into and call pivot_root
+# to switch to the new RAM backed root
+mkdir /tmpfs/oldroot
+exec switch_root /tmpfs /sbin/init
+if [ "$?" != "0" ]
+then
+	# dropping to sulogin.  Reboot when exited or CTRL-D
+	echo "switch_root failed? Hmm... "
+	# drop selinux to permissive for shell	
+	#/usr/sbin/setenforce 0
+	/bin/bash
+else
+	echo "switch_root successful."
+	# mount /dev/ and /proc to make sure we can unmount the
+	# old root right in the new root when we call the next
+	# step loader...
+	#echo; echo "Attempting to chroot into the new root..."
+	# JJW the magic at the end of the command redirects to the console
+	# in the pivot'ed root so we can unmount the /oldroot NFS stuff
+	#exec chroot . /linuxrc.switchroot <> /dev/console >&0 2>&1
+fi
+
+# drop to a shell in case
+# we get here because we really shouldn't get here.
+
+echo "We shouldn't be here.... "
+echo; echo
+# drop selinux to permissive for shell	
+#/usr/sbin/setenforce 0
+/bin/bash
+
