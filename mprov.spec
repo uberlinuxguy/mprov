@@ -35,6 +35,10 @@ mkdir -p %{buildroot}/usr/sbin/
 cp bin/mprovcmd %{buildroot}/usr/sbin/mprovcmd
 mkdir -p %{buildroot}/usr/lib/firewalld/services/
 cp mprov.xml %{buildroot}/usr/lib/firewalld/services/
+mkdir -p %{buildroot}/usr/lib/dracut/modules.d/99mprov/
+cp -r 99mprov/linuxrc %{buildroot}/usr/lib/dracut/modules.d/99mprov/
+cp -r 99mprov/module-setup.sh %{buildroot}/usr/lib/dracut/modules.d/99mprov/
+cp -r 99mprov/python-deps %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 
 %post
 /usr/bin/systemctl daemon-reload
@@ -49,9 +53,14 @@ cp mprov.xml %{buildroot}/usr/lib/firewalld/services/
 %config /etc/sysconfig/mprov
 %attr(0700, root, root) /usr/sbin/mprovcmd
 /usr/lib/firewalld/services/mprov.xml
+/usr/lib/dracut/modules.d/99mprov
 
 
 %changelog
+* Wed May 16 2018 Jason Williams <jasonw@tulg.org>
+- Lots of modifications for bugs
+- Added dracut module for including in initramfs
+
 * Fri Nov 03 2017 Jason Williams <jasonw@tulg.org>
 - reload of systemd after install/uninstall
 - add new file for mprov cmd line wrapper
