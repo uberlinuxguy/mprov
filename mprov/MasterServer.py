@@ -417,7 +417,10 @@ class MasterServer(object):
                         self.__master_data_lock.release()
                         sock.sendall("sync master worker=" + worker_sync.get_ip())
                         packet = utils.parse_packet(sock.recv(1024))  # type: dict
-
+                        # then decrement it after it's over.
+                        self.__master_data_lock.acquire()
+                        worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
+                        self.__master_data_lock.release()
                         if packet is None:
                             utils.print_err("Error: empty packet from " + worker_sync.get_ip())
                             worker.set_status("waiting")
@@ -442,12 +445,12 @@ class MasterServer(object):
                         utils.print_err("Error: worker to worker sync failed")
 
                         utils.print_err(e)
-
+                        # then decrement it after it's over.
+                        self.__master_data_lock.acquire()
+                        worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
+                        self.__master_data_lock.release()
                         sock.close()
-                # then decrement it after it's over.
-                self.__master_data_lock.acquire()
-                worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
-                self.__master_data_lock.release()
+
             else:
                 # no updated nodes, if the master is available, let's try that.
                 self.__master_data_lock.acquire()
