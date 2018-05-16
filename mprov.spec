@@ -36,9 +36,9 @@ cp bin/mprovcmd %{buildroot}/usr/sbin/mprovcmd
 mkdir -p %{buildroot}/usr/lib/firewalld/services/
 cp mprov.xml %{buildroot}/usr/lib/firewalld/services/
 mkdir -p %{buildroot}/usr/lib/dracut/modules.d/99mprov/
-cp -r 99mprov/linuxrc %{buildroot}/usr/lib/dracut/modules.d/99mprov/
-cp -r 99mprov/module-setup.sh %{buildroot}/usr/lib/dracut/modules.d/99mprov/
-cp -r 99mprov/python-deps %{buildroot}/usr/lib/dracut/modules.d/99mprov/
+cp -r dracut/99mprov/linuxrc %{buildroot}/usr/lib/dracut/modules.d/99mprov/
+cp -r dracut/99mprov/module-setup.sh %{buildroot}/usr/lib/dracut/modules.d/99mprov/
+cp -r dracut/99mprov/python-deps %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 
 %post
 /usr/bin/systemctl daemon-reload
