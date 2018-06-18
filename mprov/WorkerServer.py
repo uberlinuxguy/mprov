@@ -18,6 +18,7 @@ class WorkerServer(object):
     __slots_in_use = 0
     __my_uuid = ""
     __sync_requests = list()
+    __state="new"
 
     __config = None  # type: Config
     __hb_timer_interval = 0
@@ -42,6 +43,7 @@ class WorkerServer(object):
 
         self.__path = config.get_conf_val("path")
         self.__config = config
+        self.__status = "outdated"
         if not os.path.exists(self.__path):
             utils.print_err("Error: Path " + self.__path + " doesn't exist! Exiting.")
             exit(1)
@@ -70,10 +72,12 @@ class WorkerServer(object):
 
         #
         self.__master_connection.settimeout(60)
+        utils.print_err("Connecting to " + self.__config.get_conf_val("ms"))
         try:
             self.__master_connection.connect(master_address)
         except Exception as e:
             utils.print_err("Error: Unable to connect to master. Will Retry.")
+            utils.print_err("Error: " + e)
             self.__master_connection.close()
             self.__master_connection = None
 
@@ -179,6 +183,8 @@ class WorkerServer(object):
 
         print "Repository Sync"
 
+        self.__state="syncing"
+
         sync_connection = None
         if "repo_uuid" in packet:
             self.__repo_sync_uuid = packet["repo_uuid"]
@@ -252,12 +258,14 @@ class WorkerServer(object):
         rsyncd_proc.communicate()
 
         reply="ok"
+        self.__state="updated"
         # check the return code here!
         if rsyncd_proc.returncode != 0 and rsyncd_proc.returncode != 24 \
                 and rsyncd_proc.returncode != 20:
             utils.print_err("Error: rsync from " + sync_connection.getpeername()[0] + " died unexpectedly with RC=" +
                             str(rsyncd_proc.returncode) + "!!!")
             reply="err"
+            self.__state="err"
 
 
         # if we used a different connection for the sync, then tell the master we are done.
@@ -310,7 +318,9 @@ class WorkerServer(object):
             try:
                 my_hostname = socket.gethostname()
                 self.__master_connection.send("worker name=" + my_hostname + " worker_uuid=" + self.__my_uuid +
-                                              " slots=" + self.__config.get_conf_val("slots") + " \n")
+                                              " slots=" + str(self.__config.get_conf_val("slots")) + " status=" +
+                                              self.__state + "\n")
+
 
                 packet = utils.parse_packet(self.__master_connection.recv(1024))
                 if "ok" not in packet:

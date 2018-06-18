@@ -161,6 +161,7 @@ class MasterServer(object):
 
         worker_obj = MasterServerWorkerEntry(data + " ip=" + address[0])
 
+
         # look for this worker already in the list, and just update it's hb entry.
         for worker in self.workers:  # type: MasterServerWorkerEntry
             # check for the UUID.
@@ -169,7 +170,8 @@ class MasterServer(object):
                 # if the worker is in the list, but it's errored,
                 # and it has sent us a heartbeat, it's up, so try a
                 # sync again.
-                if worker.get_status() == "error":
+                if worker.get_status() == "error" or worker.get_status() != worker_obj.get_status():
+                    worker.set_status("syncing")
                     threading.Thread(target=self._sync_worker, args=(worker,))
                 worker.set_last_hb(time())
                 # print "Worker: " + worker.get_name() + ": hb."
@@ -705,6 +707,11 @@ class MasterServerWorkerEntry(object):
         self.__UUID = packet["worker_uuid"]
         self.__slots_total = packet["slots"]
         self.__ip = packet["ip"]
+        if "status" in packet:
+            self.__status = packet["status"]
+        else:
+            self.__status = "outdated"
+
 
     def get_slots_in_use(self):
         return int(self.__slots_in_use)
