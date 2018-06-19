@@ -171,7 +171,7 @@ class MasterServer(object):
                 # and it has sent us a heartbeat, it's up, so try a
                 # sync again.
                 if worker.get_status() == "error" or worker.get_status() != worker_obj.get_status():
-                    worker.set_status("syncing")
+                    #worker.set_status("syncing")
                     threading.Thread(target=self._sync_worker, args=(worker,))
                 worker.set_last_hb(time())
                 # print "Worker: " + worker.get_name() + ": hb."
