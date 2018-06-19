@@ -18,7 +18,7 @@ class WorkerServer(object):
     __slots_in_use = 0
     __my_uuid = ""
     __sync_requests = list()
-    __state="new"
+    __state="waiting"
 
     __config = None  # type: Config
     __hb_timer_interval = 0
@@ -77,7 +77,7 @@ class WorkerServer(object):
             self.__master_connection.connect(master_address)
         except Exception as e:
             utils.print_err("Error: Unable to connect to master. Will Retry.")
-            
+
             self.__master_connection.close()
             self.__master_connection = None
 
