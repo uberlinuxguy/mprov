@@ -77,7 +77,7 @@ class WorkerServer(object):
             self.__master_connection.connect(master_address)
         except Exception as e:
             utils.print_err("Error: Unable to connect to master. Will Retry.")
-            utils.print_err("Error: " + e)
+            
             self.__master_connection.close()
             self.__master_connection = None
 
