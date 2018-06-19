@@ -231,7 +231,8 @@ class WorkerServer(object):
                         "\tauth users = root\n" + \
                         "\tsecrets file = " + secrets_path + "\n" + \
                         "\tuid = 0\n" + \
-                        "\tgid = 0\n"
+                        "\tgid = 0\n" + \
+                        "\tpost-xfer exec = /usr/bin/pkill rsync\n"
 
         rsyncd_file.write(file_contents)
         rsyncd_file.close()
