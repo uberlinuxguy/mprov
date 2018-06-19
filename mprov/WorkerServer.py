@@ -498,7 +498,7 @@ class WorkerServer(object):
         # logging of the rsync.
         if not os.path.isdir("/tmp/mprov/"):
             # mprov tmp dir doesn't exist.
-            os.mkdir("/tmp/mprov", 700)
+            os.mkdir("/tmp/mprov", 0700)
 
         # open an rsync log for logging.
         rsync_log = open("/tmp/mprov/client_sync_" + mod_name + ".log", "w+")
@@ -639,7 +639,7 @@ class WorkerServer(object):
         # logging of the rsync.
         if not os.path.isdir("/tmp/mprov/"):
             # mprov tmp dir doesn't exist.
-            os.mkdir("/tmp/mprov", 700)
+            os.mkdir("/tmp/mprov", 0700)
 
         # open an rsync log for logging.
         rsync_log = open("/tmp/mprov/worker_sync_" + mod_name + ".log", "w+")

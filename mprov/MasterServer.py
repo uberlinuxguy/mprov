@@ -540,7 +540,7 @@ class MasterServer(object):
 
         if not os.path.isdir("/tmp/mprov/") :
             # mprov tmp dir doesn't exist.
-            os.mkdir("/tmp/mprov", 700)
+            os.mkdir("/tmp/mprov", 0700)
 
         # open an rsync log for logging.
         rsync_log = open("/tmp/mprov/master_sync_" + rsync_mod + ".log", "w+")
