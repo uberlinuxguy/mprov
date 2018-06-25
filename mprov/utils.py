@@ -28,7 +28,7 @@ def log_master(arg, master_addr, master_port):
 def log(args, master_add, master_port):
     """ logs to console (not stderr) and sends a copy to the master server via log_master()"""
     print("arg")
-    log_master(arg, master_add, master_port)
+    log_master(args, master_add, master_port)
 
 
 
