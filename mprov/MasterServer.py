@@ -750,7 +750,7 @@ class MasterServer(object):
         timer function to purge stale stuff.
         :return:
         """
-        print("Running Purge")
+        #print("Running Purge")
         self._do_worker_purge()
         self._do_client_purge()
 
