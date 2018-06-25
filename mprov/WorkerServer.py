@@ -9,6 +9,8 @@ import uuid
 import os
 import signal
 import subprocess
+import sys
+import traceback
 
 
 class WorkerServer(object):
@@ -29,6 +31,8 @@ class WorkerServer(object):
     __master_connection = None  # type: socket.socket
     __last_master_sync_ip = None
     __repo_sync_uuid = ""
+    __running_daemon = ""
+
 
     def signal_handler(self, signum, frame):
         self.__exiting = True
@@ -117,13 +121,13 @@ class WorkerServer(object):
                             self.__master_sync_active = False
                         elif "client" in packet:
                             if self.__master_sync_active:
-                                connection.send("retry\n")
+                                connection.sendall("retry")
                                 connection.close()
                                 return False
                             self._handle_client_sync(connection, address, packet["uuid"])
                         elif "worker" in packet:
                             if self.__master_sync_active:
-                                connection.send("retry\n")
+                                connection.sendall("retry")
                                 connection.close()
                                 return False
                             self._handle_worker_sync(connection, address)
@@ -162,9 +166,9 @@ class WorkerServer(object):
                 connection.close()
                 return True
             except Exception as e:
-                utils.print_err("Error: Unhandled exception thrown: " + e.message)
+                utils.print_err("Error: Unhandled exception thrown: " + str(e))
                 utils.print_err("Error: Packet generating error: " + data)
-
+                traceback.print_exc(file=sys.stderr)
                 connection.close()
                 return False
 
@@ -198,10 +202,16 @@ class WorkerServer(object):
             worker_address = (worker_address, 4018)
             try:
                 sync_connection.connect(worker_address)
-                sync_connection.send("sync worker")
+                sync_connection.sendall("sync worker")
                 packet_reply = utils.parse_packet(sync_connection.recv(1024))
+                if "retry" in packet_reply:
+                    print("Worker not redy, will retry")
+                    sync_connection.close()
+                    connection.close()
+                    return
                 if "ok" not in packet_reply:
-                    utils.print_err("Error in worker to worker sync. bad reply.")
+                    utils.print_err("Error in worker to worker sync. bad reply from: " + worker_address[0])
+                    utils.print_err("Error Packet: " + packet_reply["raw_packet"])
                     sync_connection.close()
                     connection.close()
                     return
@@ -209,7 +219,7 @@ class WorkerServer(object):
                     self.__repo_sync_uuid=packet_reply["repo_uuid"]
 
             except Exception as e:
-                utils.print_err("Error in worker to worker sync.")
+                utils.print_err("Error in worker to worker sync from: " + worker_address[0])
                 sync_connection.close()
                 connection.close()
                 return
@@ -244,6 +254,15 @@ class WorkerServer(object):
         rsyncd_file.close()
         os.close(secrets_fd)
 
+        # before we run, kill off any other rsync daemons running
+        rsyncd_running = subprocess.Popen(["/usr/bin/pgrep", "-f", "rsync --daemon"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        (pgrep_stdout, pgrep_stderr ) = rsyncd_running.communicate()
+        utils.print_err("")
+        if pgrep_stdout != "" and pgrep_stdout is not None:
+            for pid in pgrep_stdout.split("\n"):
+                os.kill(int(pid), 9)
+
+
         # setup the rsyncd command.
         rsyncd_proc = subprocess.Popen(["/usr/bin/rsync",
                                         "--daemon",
@@ -254,15 +273,15 @@ class WorkerServer(object):
                                         "--config=" + rsyncd_path], shell=False)
         self.__rsyncd_pid = rsyncd_proc.pid
 
-        sync_connection.send("ok worker_uuid=" + self.__my_uuid + " port=" + sync_port + " module=" + module_name + "\n")
+
+        sync_connection.sendall("ok worker_uuid=" + self.__my_uuid + " port=" + sync_port + " module=" + module_name)
 
         rsyncd_proc.communicate()
 
         reply="ok"
         self.__state="updated"
         # check the return code here!
-        if rsyncd_proc.returncode != 0 and rsyncd_proc.returncode != 24 \
-                and rsyncd_proc.returncode != 20:
+        if rsyncd_proc.returncode != 0 and rsyncd_proc.returncode != 24 and rsyncd_proc.returncode != 20:
             utils.print_err("Error: rsync from " + sync_connection.getpeername()[0] + " died unexpectedly with RC=" +
                             str(rsyncd_proc.returncode) + "!!!")
             reply="err"
@@ -271,7 +290,7 @@ class WorkerServer(object):
 
         # if we used a different connection for the sync, then tell the master we are done.
         if sync_connection != connection:
-            connection.send(reply)
+            connection.sendall(reply)
             connection.close()
         # clean up the tmp files.
         os.remove(rsyncd_path)
@@ -318,9 +337,9 @@ class WorkerServer(object):
         if self.__master_connection is not None:
             try:
                 my_hostname = socket.gethostname()
-                self.__master_connection.send("worker name=" + my_hostname + " worker_uuid=" + self.__my_uuid +
+                self.__master_connection.sendall("worker name=" + my_hostname + " worker_uuid=" + self.__my_uuid +
                                               " slots=" + str(self.__config.get_conf_val("slots")) + " status=" +
-                                              self.__state + "\n")
+                                              self.__state)
 
 
                 packet = utils.parse_packet(self.__master_connection.recv(1024))
@@ -402,18 +421,23 @@ class WorkerServer(object):
             packet = utils.parse_packet(sock.recv(1024))
         except Exception as e:
             utils.print_err("Error: Network issue communicating to master.")
+            utils.print_err("Error: Exception: " + str(e))
             sock.close()
 
         if packet is None:
             utils.print_err("Error: Master didn't verify sync request.")
             self._cleanup_client_req(req_uuid)
             return
-
+        if packet["raw_packet"] == "" or "err" in packet:
+            utils.print_err("Error: Master didn't verify sync request.")
+            self._cleanup_client_req(req_uuid)
+            return
+        print packet["raw_packet"]
         cli_uuid = packet["client_uuid"]
         req_mod = packet["image"]
         cli_ip = packet["ip"]
         req_uuid = packet["uuid"]
-
+        print("Master verified the request.  Telling the client and waiting until it's ready.")
         # make an WorkerServerSync object and stick it in the list.
         cli_req = WorkerServerSync(req_uuid,
                                    cli_uuid,
@@ -424,7 +448,7 @@ class WorkerServer(object):
         self.__sync_requests.append(cli_req)
 
         # now we have a valid client object, so tell the client to proceed.
-        connection.send("ok\n")
+        connection.sendall("ok")
 
         # now we wait for the client to tell us it's ready.
         connection.settimeout(60)
@@ -518,9 +542,9 @@ class WorkerServer(object):
         return_code = rsync_proc.returncode
         if return_code != 0 and return_code != 24:
             utils.print_err("Error: Client rsync died prematurely! RC=" + str(return_code))
-            connection.send("ok result=error")
+            connection.sendall("ok result=error")
         else:
-            connection.send("ok result=pass")
+            connection.sendall("ok result=pass")
             os.remove(file_path)
 
         # mark the sync as done.
@@ -575,7 +599,7 @@ class WorkerServer(object):
         print "Worker to worker sync requested from: " + address[0]
 
         # tell the other end to proceed.
-        connection.send("ok repo_uuid=" + self.__my_uuid)
+        connection.sendall("ok repo_uuid=" + self.__my_uuid)
 
         # now we wait for the worker to tell us it's ready.
         connection.settimeout(60)
@@ -625,6 +649,7 @@ class WorkerServer(object):
         rsync_args = ["/usr/bin/rsync",
                       "-avx",
                       "--delete",
+                      "--delete-after",
                       "--progress",
                       "--exclude=/tmp",
                       "--exclude=/proc",
@@ -647,7 +672,7 @@ class WorkerServer(object):
 
         # we are about to run but give the worker a couple of seconds to make sure the
         # rsync is set up on their end
-        sleep(5)
+        sleep(10)
 
         rsync_proc = subprocess.Popen(rsync_args, stdout=rsync_log, stderr=rsync_log)
 
