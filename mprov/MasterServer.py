@@ -284,9 +284,9 @@ class MasterServer(object):
             return
         packet = data
         if "masterlog" in packet:
-            print(packet["raw_packet"][10:])
+            print(packet["raw_packet"][17:])
 
-        if "list" in packet:
+        elif "list" in packet:
             if "workers" in packet:
                 connection.sendall("Currently registered workers:\n")
                 connection.sendall("Active Threads on Master: " + str(threading.active_count()) + "\n")
