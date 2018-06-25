@@ -1,4 +1,5 @@
 import re
+import sys
 import socket
 import threading
 import uuid
@@ -36,7 +37,7 @@ class Client(object):
         self.__my_uuid = str(uuid.uuid4())
         self.__config = config
         self.__path = config.get_conf_val("path")
-        self.__retries = 3  # hard coded for now.
+        self.__retries = 0
         self.__hb_timer = None  # type: threading.Timer
         self.__req_uuid = ""
         self.__syncing = False
@@ -60,6 +61,7 @@ class Client(object):
         self.__master_connection.settimeout(30)
         master_address = (self.__config.get_conf_val("ms"), 4017)
 
+        utils.print_err("Attempting to connect to master: " + master_address[0])
         try:
             self.__master_connection.connect(master_address)
         except Exception as e:
@@ -99,7 +101,7 @@ class Client(object):
             # master should reply in 30 seconds or so...
             self.__master_connection.settimeout(30)
             master_address = (self.__config.get_conf_val("ms"), 4017)
-
+            utils.print_err("Attempting to connect to master: " + master_address[0])
             try:
                 self.__master_connection.connect(master_address)
             except Exception as e:
@@ -112,15 +114,10 @@ class Client(object):
             cmd_send = "client client_uuid=" + self.__my_uuid + " image=" + self.__config.get_conf_val("image")
             if self.__req_uuid != "":
                 cmd_send = cmd_send + " uuid=" + self.__req_uuid
-                if not self.__syncing:
-                    cmd_send = cmd_send + " state=done"
-                else:
-                    cmd_send = cmd_send + " state=syncing"
+                cmd_send = cmd_send + " state=syncing"
             else:
                 cmd_send = cmd_send + " state=syncing"
-            cmd_send += "\n"
-
-            self.__master_connection.send(cmd_send)
+            self.__master_connection.sendall(cmd_send)
 
             packet = utils.parse_packet(self.__master_connection.recv(1024))  # type: dict
             if packet is None:
@@ -131,6 +128,7 @@ class Client(object):
             if "ok" not in packet:
                 if "err" in packet:
                     utils.print_err("No worker found, waiting for more workers...")
+
                 else:
                     utils.print_err("Error: Master Server responded poorly to our register request. Will retry.")
                     utils.print_err("Error: Master Server Said: '" + packet["raw_packet"] + "'")
@@ -206,7 +204,7 @@ class Client(object):
         while self.__syncing:
             # if we get here we have a good connection, so let's make sure it doesn't go anywhere
             try:
-                sock.sendall("ok\n")
+                sock.sendall("ok")
                 packet = utils.parse_packet(sock.recv(15))
                 if "ok" not in packet:
                     self._cancel_rsync()
@@ -231,6 +229,12 @@ class Client(object):
         return False
 
     def _handle_sync(self, worker_ip):
+
+        if self.__retries > 5:
+            utils.print_err("Error: Maximum retries (5) reached.  Exiting")
+            sys.exit(-1)
+
+
         # connect to the worker and wait for it to reply that it's ready.
         # create a new socket for the worker connection.
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -243,15 +247,23 @@ class Client(object):
             sock.connect(worker_address)
             sock.sendall("sync client uuid=" + self.__req_uuid + " client_uuid=" + self.__my_uuid)
             packet = utils.parse_packet(sock.recv(1024))
+            if packet is None:
+                utils.print_err("Error: Worker " + worker_ip + " replied badly.  Will retry.")
+                utils.print_err("Error Packet is empty")
+                sock.close()
+                self.__syncing = False
+                self.__retries += 1
+                return False
             if "ok" not in packet:
                 utils.print_err("Error: Worker replied badly.  Will retry.")
+                utils.print_err("Error Packet: "  + packet["raw_packet"])
                 sock.close()
                 self.__syncing = False
                 self.__retries += 1
                 return False
         except Exception as e:
             sock.close()
-            utils.print_err("Error: Exception in worker comms: " + e.message)
+            utils.print_err("Error: Exception in worker comms: " + str(e))
             self.__syncing = False
             self.__retries += 1
             utils.print_err(("Error: Sending master worker IP: " + worker_ip))
@@ -290,7 +302,7 @@ class Client(object):
         rsyncd_file.write("root:" + self.__my_uuid)
         rsyncd_file.close()
         os.close(secrets_fd)
-        print "Starting sync from worker."
+        print "Starting sync from worker: " + worker_address[0]
         # setup the rsyncd command.
         rsyncd_proc = subprocess.Popen(["/usr/bin/rsync",
                                         "--daemon",
@@ -302,7 +314,7 @@ class Client(object):
         self.__rsyncd_pid = rsyncd_proc.pid
 
         # tell the worker we are good to go.
-        sock.send("ok client_uuid=" + self.__my_uuid + " port=" + sync_port + " module=" + module_name + "\n")
+        sock.sendall("ok client_uuid=" + self.__my_uuid + " port=" + sync_port + " module=" + module_name)
 
         # wait for the rsyncd to terminate.
         rsyncd_proc.communicate()
@@ -352,22 +364,15 @@ class Client(object):
                 utils.print_err("Error: " + e.message)
 
         if self.__master_connection is not None:
-            cmd_send = "client client_uuid=" + self.__my_uuid + " image=" + self.__config.get_conf_val("image")
-            if self.__req_uuid != "":
-                cmd_send = cmd_send + " uuid=" + self.__req_uuid
-            cmd_send = cmd_send + " state=done"
-
-            cmd_send += "\n"
-
             cmd_send = "client client_uuid=" + self.__my_uuid + \
                        " image=" + self.__config.get_conf_val("image")
             if self.__req_uuid != "":
                 cmd_send = cmd_send + " uuid=" + self.__req_uuid
             cmd_send = cmd_send + " state=done"
-            cmd_send += "\n"
+
             utils.print_err("Sending to master: " + cmd_send)
-            self.__master_connection.send(cmd_send)
-            self.__master_connection.recv(1024)
+            self.__master_connection.sendall(cmd_send)
+            utils.print_err(self.__master_connection.recv(1024))
         else:
             utils.print_err("Error: Unable to notify master.")
             utils.print_err("Error: Stale connection likely present on master.")
@@ -403,19 +408,16 @@ class Client(object):
             cmd_send = "client client_uuid=" + self.__my_uuid + " image=" + self.__config.get_conf_val("image")
             if self.__req_uuid != "":
                 cmd_send = cmd_send + " uuid=" + self.__req_uuid
-            cmd_send = cmd_send + " state=syncing worker="
+            cmd_send = cmd_send + " state=syncing worker_ip="
             cmd_send = cmd_send +  worker_ip + " worker_state=error"
 
-            cmd_send += "\n"
-
-            cmd_send = "client client_uuid=" + self.__my_uuid + \
-                       " image=" + self.__config.get_conf_val("image")
-            if self.__req_uuid != "":
-                cmd_send = cmd_send + " uuid=" + self.__req_uuid
-            cmd_send = cmd_send + " state=done"
-            cmd_send += "\n"
-            #utils.print_err("Sending to master: " + cmd_send)
-            self.__master_connection.send(cmd_send)
+            #cmd_send = "client client_uuid=" + self.__my_uuid + \
+            #           " image=" + self.__config.get_conf_val("image")
+            #if self.__req_uuid != "":
+            #    cmd_send = cmd_send + " uuid=" + self.__req_uuid
+            #cmd_send = cmd_send + " state=done"
+            utils.print_err("Sending to master: " + cmd_send)
+            self.__master_connection.sendall(cmd_send)
             self.__master_connection.recv(1024)
         else:
             utils.print_err("Error: Unable to notify master.")
