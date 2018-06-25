@@ -470,7 +470,8 @@ class WorkerServer(object):
             return
 
         if "ok" not in packet_client:
-            utils.print_err("Error: Client wasn't ready.")
+            #utils.print_err("Error: Client wasn't ready.")
+            utils.log("Error: Client wasn't ready.", self.__config.get_conf_val("ms"), 4017)
             connection.close()
             cli_req.set_sync_active(False)
             return
@@ -620,6 +621,7 @@ class WorkerServer(object):
 
         if "ok" not in packet_worker:
             utils.print_err("Error: Client wasn't ready.")
+            utils.log("Error: Client wasn't ready.", self.__config.get_conf_val("ms"), 4017)
             connection.close()
             return
 
