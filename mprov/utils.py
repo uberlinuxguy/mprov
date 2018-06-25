@@ -1,10 +1,35 @@
 
 
 from sys import stderr
+import socket
 
 def print_err(arg):
     """ simple function to print errors to stderr """
     print >> stderr, arg
+
+
+def log_master(arg, master_addr, master_port):
+    """ log a message to the master server using it's "log" command."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    master_address = (master_addr, master_port)
+
+    sock.settimeout(30)
+
+    try:
+        sock.connect(master_address)
+        sock.sendall("masterlog " + arg)
+        sock.recv(1024)
+    except Exception as e:
+        print_err("Error: Network issue communicating to master.")
+        print_err("Error: Exception: " + str(e))
+    sock.close()
+
+
+def log(args, master_add, master_port):
+    """ logs to console (not stderr) and sends a copy to the master server via log_master()"""
+    print("arg")
+    log_master(arg, master_add, master_port)
+
 
 
 def parse_packet(data):

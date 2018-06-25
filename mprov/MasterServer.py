@@ -283,6 +283,9 @@ class MasterServer(object):
             connection.close()
             return
         packet = data
+        if "masterlog" in packet:
+            print(packet["raw_packet"][10:])
+
         if "list" in packet:
             if "workers" in packet:
                 connection.sendall("Currently registered workers:\n")
