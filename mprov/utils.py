@@ -17,7 +17,7 @@ def log_master(arg, master_addr, master_port):
 
     try:
         sock.connect(master_address)
-        sock.sendall("masterlog " + arg)
+        sock.sendall("execmd masterlog " + arg)
         sock.recv(1024)
     except Exception as e:
         print_err("Error: Network issue communicating to master.")
