@@ -260,7 +260,8 @@ class WorkerServer(object):
         utils.print_err("")
         if pgrep_stdout != "" and pgrep_stdout is not None:
             for pid in pgrep_stdout.split("\n"):
-                os.kill(int(pid), 9)
+                if pid != "":
+                    os.kill(int(pid), 9)
 
 
         # setup the rsyncd command.
