@@ -52,7 +52,7 @@ class MasterServer(object):
         self.workers = list()  # type: list MasterServerWorkerEntry
         self.client_requests = list()  # type: list MasterServerClientRequest
 
-        self.__master_data_lock = threading.Lock()
+        self.__master_data_lock = threading.RLock()
 
         # set up our listen socket.
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # type: socket
@@ -76,26 +76,32 @@ class MasterServer(object):
         Run the MasterServer
         :return: none
         """
-        self.sock.listen(1024)
+        self.sock.listen(5)
 
         # create a timer for syncing
-        self.__sync_timer = threading.Timer(self.__sync_timer_interval, self._worker_sync_timer())
+        self.__sync_timer = threading.Timer(self.__sync_timer_interval, self._worker_sync_timer)
+        self.__sync_timer.setName("syncer")
         self.__sync_timer.start()
 
         # create a timer for purge checking
         self.__purge_timer = threading.Timer(self.__purge_timer_interval, self._stale_purge_timer)
+        self.__purge_timer.setName("purger")
         self.__purge_timer.start()
 
         while True:
 
-            try:
-                client, address = self.sock.accept()
-            except KeyboardInterrupt as kbd_int:
-                self.signal_handler(signal.SIGINT, None)
-                return
+            #if threading.active_count() < 500 :
+                try:
+                    client, address = self.sock.accept()
+                except KeyboardInterrupt as kbd_int:
+                    self.signal_handler(signal.SIGINT, None)
+                    return
 
-            client.settimeout(60)
-            threading.Thread(target=self._handle_connection, args=(client, address)).start()
+                client.settimeout(60)
+                threading.Thread(name=address[0], target=self._handle_connection, args=(client, address)).start()
+            #else:
+            #    # need to sleep for a few seconds here to make sure we aren't in a tight loop.
+            #    sleep(10)
 
     def _handle_connection(self, client, address):
         """
@@ -112,7 +118,8 @@ class MasterServer(object):
                 packet = utils.parse_packet(client.recv(size))
                 if packet is not None:
                     if "execmd" in packet:
-                        self._handle_cmd(client, address, packet["raw_packet"])
+                        self._handle_cmd(client, address,packet)
+                        client.close()
                     elif "worker" in packet:
                         self._handle_worker_req(client, address, packet["raw_packet"])
                     elif "client" in packet:
@@ -125,25 +132,31 @@ class MasterServer(object):
                                     worker = self._find_worker_by_uuid(req.get_worker_uuid())
                                     if worker is not None:
                                         worker.set_status("error")
+                                        utils.print_err("Worker (" + worker.get_ip() + ") error reported by client: " + address[0])
                                     else:
                                         utils.print_err("Error: client reported error on unknown worker.")
                                 else:
-                                    utils.print_err("Error: unknown request attempted to report worker error")
+                                    utils.print_err("Error: unknown request attempted to report worker error by: " + address[0])
                         self._handle_client_req(client, address, packet["raw_packet"])
                     elif "verify" in packet:
                         req_uuid = packet["uuid"]
+                        self.__master_data_lock.acquire()
                         client_req = self._find_req_by_uuid(req_uuid)  # type: MasterServerClientRequest
                         if client_req is None:
-                            client.send("err: unable to find request")
+                            client.sendall("err unable to find request")
+                            utils.print_err("Error: Unable to find req " + req_uuid + " For worker: " + address[0])
                         else:
-                            client.send(client_req.serialize() + "uuid=" + req_uuid)
+                            client.sendall(client_req.serialize() + " uuid=" + req_uuid)
+                        self.__master_data_lock.release()
                     else:
-                        client.send("Error: Unrecognized command.\n")
+                        client.sendall("Error: Unrecognized command.\n")
                 else:
                     client.close()
                     return False
-            except socket.timeout:
-            #    print e
+            except socket.timeout :
+                client.close()
+                return False
+            except Exception as e:
                 client.close()
                 return False
 
@@ -159,7 +172,7 @@ class MasterServer(object):
         :return:
         """
 
-        worker_obj = MasterServerWorkerEntry(data + " ip=" + address[0])
+        worker_obj = MasterServerWorkerEntry(data + " ip=" + address[0], self.__master_data_lock)
 
 
         # look for this worker already in the list, and just update it's hb entry.
@@ -172,10 +185,11 @@ class MasterServer(object):
                 # sync again.
                 if worker.get_status() == "error" or worker.get_status() != worker_obj.get_status():
                     #worker.set_status("syncing")
-                    threading.Thread(target=self._sync_worker, args=(worker,))
+                    threading.Thread(name=worker.get_name, target=self._sync_worker, args=(worker,))
                 worker.set_last_hb(time())
                 # print "Worker: " + worker.get_name() + ": hb."
                 client.sendall("ok")
+
                 return
             else:
                 if (worker_obj.get_name() == worker.get_name()) and \
@@ -193,8 +207,8 @@ class MasterServer(object):
         worker_obj.set_status("outdated")
         self.workers.append(worker_obj)
         client.sendall("ok")
-        print "New worker: " + address[0] + " registered"
-        threading.Thread(target=self._sync_worker, args=(worker_obj,)).start()
+        #print "New worker: " + address[0] + " registered"
+        threading.Thread(name=address[0], target=self._sync_worker, args=(worker_obj,)).start()
 
     def _handle_client_req(self, connection, address, data):
         """
@@ -212,36 +226,45 @@ class MasterServer(object):
         # look for this client_request already in the list, and just update it's hb entry.
         for m_client in self.client_requests:  # type: MasterServerClientRequest
             if client_obj.get_uuid() == m_client.get_uuid():
+                self.__master_data_lock.acquire()
                 m_client.set_last_hb(time())
+                self.__master_data_lock.release()
                 tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())
                 if tmp_worker is None:
                     utils.print_err("Error: unable to get worker by uuid for client. Worker UUID: " +
                                     m_client.get_worker_uuid())
                     utils.print_err("Error: Purging client.")
+                    self.__master_data_lock.acquire()
                     self.client_requests.remove(m_client)
+                    self.__master_data_lock.release()
 
                 if client_obj.get_done() == "done":
+                    self.__master_data_lock.acquire()
                     tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
-
+                    #utils.print_err("Client: " + m_client.get_ip() + " complete. Removing request " + m_client.get_uuid())
+                    self.client_requests.remove(m_client)
+                    self.__master_data_lock.release()
                 connection.sendall("ok uuid=" + client_obj.get_uuid() +
-                                   " worker_ip=" + tmp_worker.get_ip() + "\n")
+                                   " worker_ip=" + tmp_worker.get_ip())
                 return
 
-        client_obj.set_last_hb(time())
-        self.client_requests.append(client_obj)
         #
         # look up the least used worker and send the client there.
-
+        #self.__master_data_lock.release()
         free_worker = self._find_least_updated_worker()  # type: MasterServerWorkerEntry
         if free_worker is None:
             connection.sendall("err no workers found.")
-            self.client_requests.remove(client_obj)
+            #print "Removing request " + m_client.get_uuid()
+            #self.__master_data_lock.acquire()
+            #self.client_requests.remove(client_obj)
+            #self.__master_data_lock.release()
             return
-
+        self.__master_data_lock.acquire()
+        client_obj.set_last_hb(time())
+        self.client_requests.append(client_obj)
         client_obj.set_worker_uuid(free_worker.get_uuid())
-        free_worker.set_slots_in_use(free_worker.get_slots_in_use() + 1 )
-    
-        connection.sendall("ok uuid=" + client_obj.get_uuid() + " worker_ip=" + free_worker.get_ip() + "\n")
+        self.__master_data_lock.release()
+        connection.sendall("ok uuid=" + client_obj.get_uuid() + " worker_ip=" + free_worker.get_ip())
 
     def _handle_cmd(self, connection, address, data):
         """
@@ -256,44 +279,102 @@ class MasterServer(object):
 
         # security check, only localhost connections.
         if address[0] != "127.0.0.1":
-            connection.send("Permission Denied.\n\n")
+            connection.sendall("Permission Denied.\n\n")
             connection.close()
             return
-        packet = utils.parse_packet(data)
+        packet = data
         if "list" in packet:
             if "workers" in packet:
-                connection.send("Currently registered workers:\n")
+                connection.sendall("Currently registered workers:\n")
+                connection.sendall("Active Threads on Master: " + str(threading.active_count()) + "\n")
+                connection.sendall("Internal Sync Slots: " + str(self.__sync_slots_used) + " used of " + str(self.__sync_slots) + "\n")
+                connection.sendall("Waiting:\n")
+
                 for worker in self.workers:  # type: MasterServerWorkerEntry
-                    connection.send("\t" + worker.get_name() + " " +
-                                    worker.get_uuid() + " " +
-                                    worker.get_ip() + " " +
-                                    datetime.fromtimestamp(worker.get_last_sync()).strftime('%Y-%m-%d %H:%M:%S') + " " +
-                                    str(worker.get_slots_total()) + " " +
-                                    str(worker.get_slots_in_use()) + " " +
-                                    worker.get_status() + "\n")
+                    if worker.get_status() == "waiting":
+                        connection.sendall("\t" + worker.get_name() + " " +
+                                        worker.get_uuid() + " " +
+                                        worker.get_ip() + " " +
+                                        datetime.fromtimestamp(worker.get_last_sync()).strftime('%Y-%m-%d %H:%M:%S') + " " +
+                                        str(worker.get_slots_total()) + " " +
+                                        str(worker.get_slots_in_use()) + " " +
+                                        worker.get_status() + "\n")
+                connection.sendall("Error:\n")
+                for worker in self.workers:  # type: MasterServerWorkerEntry
+                    if worker.get_status() == "error":
+                        connection.sendall("\t" + worker.get_name() + " " +
+                                        worker.get_uuid() + " " +
+                                        worker.get_ip() + " " +
+                                        datetime.fromtimestamp(worker.get_last_sync()).strftime('%Y-%m-%d %H:%M:%S') + " " +
+                                        str(worker.get_slots_total()) + " " +
+                                        str(worker.get_slots_in_use()) + " " +
+                                        worker.get_status() + "\n")
+                connection.sendall("Updated:\n")
+                for worker in self.workers:  # type: MasterServerWorkerEntry
+                    if worker.get_status() == "updated":
+                        connection.sendall("\t" + worker.get_name() + " " +
+                                        worker.get_uuid() + " " +
+                                        worker.get_ip() + " " +
+                                        datetime.fromtimestamp(worker.get_last_sync()).strftime(
+                                            '%Y-%m-%d %H:%M:%S') + " " +
+                                        str(worker.get_slots_total()) + " " +
+                                        str(worker.get_slots_in_use()) + " " +
+                                        worker.get_status() + "\n")
+                connection.sendall("Syncing:\n")
+                for worker in self.workers:  # type: MasterServerWorkerEntry
+                    if worker.get_status() == "syncing":
+                        connection.sendall("\t" + worker.get_name() + " " +
+                                        worker.get_uuid() + " " +
+                                        worker.get_ip() + " " +
+                                        datetime.fromtimestamp(worker.get_last_sync()).strftime(
+                                            '%Y-%m-%d %H:%M:%S') + " " +
+                                        str(worker.get_slots_total()) + " " +
+                                        str(worker.get_slots_in_use()) + " " +
+                                        worker.get_status() + "\n")
+                connection.sendall("Other:\n")
+                for worker in self.workers:  # type: MasterServerWorkerEntry
+                    if worker.get_status() != "error" and worker.get_status() != "updated" and \
+                        worker.get_status() != "waiting" and worker.get_status() != "syncing":
+
+                        connection.sendall("\t" + worker.get_name() + " " +
+                                        worker.get_uuid() + " " +
+                                        worker.get_ip() + " " +
+                                        datetime.fromtimestamp(worker.get_last_sync()).strftime(
+                                            '%Y-%m-%d %H:%M:%S') + " " +
+                                        str(worker.get_slots_total()) + " " +
+                                        str(worker.get_slots_in_use()) + " " +
+                                        worker.get_status() + "\n")
             elif "clients" in packet:
-                connection.send("Current client requests:\n")
+                count_reqs = len(self.client_requests)
+                connection.sendall(str(count_reqs) + " Current client requests:\n")
                 for m_client in self.client_requests:  # type: MasterServerClientRequest
-                    connection.send("\t" + m_client.get_ip() + " " +
+                    connection.sendall("\t" + m_client.get_ip() + " " +
                                     m_client.get_client_uuid() + " " +
                                     m_client.get_req_mod() + " " +
                                     str(m_client.get_start_time()) + " " +
                                     m_client.get_uuid() + "\n")
             else:
-                connection.send("Error: Unrecognized command.\n")
+                connection.sendall("Error: Unrecognized commands.\n")
         elif "purge" in packet:
             # issue a request to purge any stale worker nodes.
             # worker_purge calls the function to also purge stale clients.
             self._do_stale_purge()
-            connection.send("ok\n")
+            connection.sendall("ok\n")
 
         elif "sync" in packet:
             # issue a request to sync all worker nodes.
             print "Full sync requested. Invalidating all workers."
-            self._do_worker_syncs()
-            connection.send("ok\n")
+            if "recover" in packet:
+                recover=True
+            else:
+                recover = False
+            # "sync recover" is a forcible reset of the syncing system.  So where we are forcibly
+            # resetting the internal syncing slot.
+            self.__sync_slots_used = 0;
+            self._do_worker_syncs(recover)
+            connection.sendall("ok\n")
         else:
-            connection.send("Error: Unrecognized command.\n")
+            connection.sendall("Error: Unrecognized commandz.\n")
 
     def _find_worker_by_uuid(self, worker_uuid):
         """
@@ -326,8 +407,8 @@ class MasterServer(object):
             if worker.get_status() == "updated":
                 # if this worker has no used slots, return it.
                 if worker.get_slots_in_use() <= 0:
-                    self.__master_data_lock.release()
-                    return worker
+                    tmp_worker=worker
+                    break;
                 else:
                     # if this worker has used slots but less used slots than total slots.
                     if worker.get_slots_in_use() < worker.get_slots_total():
@@ -341,31 +422,45 @@ class MasterServer(object):
                             tmp_worker = worker
         # should either be None, if no worker is found to have any open slots.
         # or the worker with the least open slots.
+
+
+        # increment the worker's use count.
+        if tmp_worker is not None:
+            tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use() + 1)
         self.__master_data_lock.release()
         return tmp_worker
 
     def _worker_sync_timer(self):
-        self._do_worker_syncs()
+        self._do_worker_syncs(False)
         if not self.__exiting:
             self.__sync_timer = threading.Timer(self.__sync_timer_interval, self._worker_sync_timer)
             self.__sync_timer.start()
 
-    def _do_worker_syncs(self):
+    def _do_worker_syncs(self, recover):
         """"
         timer function to sync the worker nodes and remove any stale workers.
         """
-        print "Worker Sync Started."
-        # first invalidate all the workers.
-        for worker in self.workers:
-            if worker.get_status() == "updated":
-                worker.set_status("outdated")
+        try:
+            print "Worker Sync Started."
+            # first invalidate all the workers.
+            self.__master_data_lock.acquire()
+            for worker in self.workers:
+                if worker.get_status() == "updated":
+                    worker.set_status("outdated")
+                if worker.get_status() == "error" and recover :
+                    worker.set_status("outdated")
+            self.__master_data_lock.release()
 
-        # now step through the remaining workers and sync anyone that isn't syncing.
-        self.__master_data_lock.acquire()
-        for worker in self.workers:  # type: MasterServerWorkerEntry
-            if worker.get_status() == "outdated":
-                threading.Thread(target=self._sync_worker, args=(worker,)).start()
-        self.__master_data_lock.release()
+            # now step through the remaining workers and sync anyone that isn't syncing.
+            self.__master_data_lock.acquire()
+            for worker in self.workers:  # type: MasterServerWorkerEntry
+                if worker.get_status() == "outdated":
+                    threading.Thread(name=worker.get_name(), target=self._sync_worker, args=(worker,)).start()
+            self.__master_data_lock.release()
+        except Exception as e:
+            print("Error: Exception in sync timer")
+            print("Error: Exception: " + str(e))
+            traceback.print_exc()
 
     def _sync_worker(self, worker):
         """
@@ -377,6 +472,8 @@ class MasterServer(object):
         """
 
         force_master_sync = False
+        if worker.get_status() == "syncing" :
+            return
 
         # attempt to sync to a worker.  As a last result, try to sync from master.
         while not force_master_sync:
@@ -388,10 +485,7 @@ class MasterServer(object):
             # attempt to hand off the client to a worker
             worker_sync = self._find_least_updated_worker()
             if worker_sync is not None:
-                # increment the worker's use count.
-                self.__master_data_lock.acquire()
-                worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() + 1)
-                self.__master_data_lock.release()
+
                 # don't allow a worker to sync to itself.
                 if worker_sync.get_uuid() == worker.get_uuid():
                     worker_sync = None
@@ -405,7 +499,9 @@ class MasterServer(object):
 
                 else:
                     # we have a valid, updated worker, try a sync
+                    self.__master_data_lock.acquire()
                     worker.set_sync_src_uuid(worker_sync.get_uuid())
+                    self.__master_data_lock.release()
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
                     try:
@@ -424,22 +520,23 @@ class MasterServer(object):
                         worker_sync.set_slots_in_use(worker_sync.get_slots_in_use() - 1)
                         self.__master_data_lock.release()
                         if packet is None:
-                            utils.print_err("Error: empty packet from " + worker_sync.get_ip())
+                            #utils.print_err("Error: empty packet from " + worker.get_ip())
+                            self.__master_data_lock.acquire()
                             worker.set_status("waiting")
+                            self.__master_data_lock.release()
                         else:
                             if "ok" not in packet:
                                 self.__master_data_lock.acquire()
-                                worker.set_status("error")
+                                worker.set_status("waiting")
                                 self.__master_data_lock.release()
-                                sock.close()
-                                return False
+                            else:
 
-                            # status is updated from an updated worker, set to upadted
-                            self.__master_data_lock.acquire()
-                            worker.set_status("updated")
-                            worker.set_last_sync(time())
-                            self.__master_data_lock.release()
-                            return True
+                                # status is updated from an updated worker, set to upadted
+                                self.__master_data_lock.acquire()
+                                worker.set_status("updated")
+                                worker.set_last_sync(time())
+                                self.__master_data_lock.release()
+                                return True
                     except Exception as e:
                         self.__master_data_lock.acquire()
                         worker.set_status("error")
@@ -482,16 +579,26 @@ class MasterServer(object):
             sock.connect(worker_address)
             sock.sendall("sync master repo_uuid=" + self.__UUID)
             packet = utils.parse_packet(sock.recv(1024))  # type: dict
+            if packet is None:
+                self.__sync_slots_used = self.__sync_slots_used - 1
+                utils.print_err("Error: empty packet from " + worker.get_ip())
+                self.__master_data_lock.acquire()
+                worker.set_status("outdated")
+                self.__master_data_lock.release()
+                sock.close()
+                return False
             if "ok" not in packet:
                 self.__sync_slots_used = self.__sync_slots_used - 1
+                utils.print_err("Error: Received bad packet from " + worker.get_ip())
+                utils.print_err("Error: Packet: " + packet["raw_packet"])
                 self.__master_data_lock.acquire()
-                worker.set_status("error")
+                worker.set_status("outdated")
                 self.__master_data_lock.release()
                 sock.close()
                 return False
         except Exception as e:
             self.__sync_slots_used = self.__sync_slots_used - 1
-            utils.print_err("Error: Unable to talk to worker at " + worker_address[0] + ": " + e.message)
+            utils.print_err("Error: Unable to talk to worker at " + worker_address[0] + ": " + str(e))
             sock.close()
             self.__master_data_lock.acquire()
             worker.set_status("error")
@@ -507,6 +614,8 @@ class MasterServer(object):
         # double check the worker's supplied params.
         if worker_uuid == "":
             self.__sync_slots_used = self.__sync_slots_used - 1
+            utils.print_err("Error: Received bad packet from " + worker_sync.get_ip())
+            utils.print_err("Error: Packet: " + packet["raw_packet"])
             self.__master_data_lock.acquire()
             worker.set_status("error")
             self.__master_data_lock.release()
@@ -515,6 +624,8 @@ class MasterServer(object):
 
         if port == "":
             self.__sync_slots_used = self.__sync_slots_used - 1
+            utils.print_err("Error: Received bad packet from " + worker_sync.get_ip())
+            utils.print_err("Error: Packet: " + packet["raw_packet"])
             self.__master_data_lock.acquire()
             worker.set_status("error")
             self.__master_data_lock.release()
@@ -523,6 +634,8 @@ class MasterServer(object):
 
         if rsync_mod == "":
             self.__master_data_lock.acquire()
+            utils.print_err("Error: Received bad packet from " + worker_sync.get_ip())
+            utils.print_err("Error: Packet: " + packet["raw_packet"])
             worker.set_status("error")
             self.__master_data_lock.release()
             sock.close()
@@ -548,6 +661,7 @@ class MasterServer(object):
         rsync_args=["/usr/bin/rsync",
                     "-avx",
                     "--delete",
+                    "--delete-after",
                     "--progress",
                     "--exclude=/tmp",
                     "--exclude=/proc",
@@ -558,7 +672,7 @@ class MasterServer(object):
                     "--port=" + port,
                     self.__path + "/",
                     "root@" + worker.get_ip() + "::" + rsync_mod]
-        print "Run: " + " ".join(rsync_args)
+        #print "Run: " + " ".join(rsync_args)
 
         rsync_log.write("Run: " + " ".join(rsync_args) + "\n")
 
@@ -587,7 +701,7 @@ class MasterServer(object):
             # send it the signal to shut-down.
             sock2.sendall("stop master repo_uuid=" + self.__UUID)
         except Exception as e:
-            print e
+            utils.print_err(str(e))
             self.__master_data_lock.acquire()
             self.__sync_slots_used = self.__sync_slots_used - 1
             worker.set_status("error")
@@ -600,7 +714,7 @@ class MasterServer(object):
         # now, let's check the return code of the rsync process and see if it was an error.
         if return_code != 0  and return_code != 24:
             utils.print_err("Error: rsync returned '" + str(return_code) + "'")
-            utils.print_err("Error: marking worker as status 'error'")
+            utils.print_err("Error: marking worker as status 'error' for worker: " + worker.get_ip())
             self.__master_data_lock.acquire()
             worker.set_status("error")
             self.__master_data_lock.release()
@@ -633,6 +747,7 @@ class MasterServer(object):
         timer function to purge stale stuff.
         :return:
         """
+        print("Running Purge")
         self._do_worker_purge()
         self._do_client_purge()
 
@@ -701,17 +816,22 @@ class MasterServerWorkerEntry(object):
     __last_hb = 0
     __sync_src_uuid = ""
 
-    def __init__(self, info):
+    def __init__(self, info, master_lock):
+        self.__master_lock=master_lock
         packet = utils.parse_packet(info)
+        if packet is None:
+            return None
+        self.__master_lock.acquire()
         self.__name = packet["name"]
         self.__UUID = packet["worker_uuid"]
         self.__slots_total = packet["slots"]
         self.__ip = packet["ip"]
+
         if "status" in packet:
             self.__status = packet["status"]
         else:
             self.__status = "outdated"
-
+        self.__master_lock.release()
 
     def get_slots_in_use(self):
         return int(self.__slots_in_use)
@@ -752,7 +872,7 @@ class MasterServerWorkerEntry(object):
     def set_last_hb(self, last_hb):
         self.__last_hb = last_hb
 
-    def set_uuid(self, uuid):
+    def set_uuid(self, uuid):\
         self.__UUID = uuid
 
     def set_sync_src_uuid(self, src_uuid):
@@ -832,12 +952,12 @@ class MasterServerClientRequest(object):
         if "uuid" in packet:
             self.__UUID=packet["uuid"]
         else:
-            print "New Client Request from: " + self.__ip
+            #print "New Client Request from: " + self.__ip
             self.__UUID = str(uuid.uuid4())
         self.__start_time = time()
 
     def serialize(self):
-        return "client_uuid=" + self.__client_UUID + \
+        return "ok client_uuid=" + self.__client_UUID + \
                " image=" + self.__req_mod + \
                " ip=" + self.__ip + \
-               " uuid=" + self.__UUID + "\n"
+               " uuid=" + self.__UUID
