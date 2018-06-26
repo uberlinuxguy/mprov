@@ -690,6 +690,27 @@ class MasterServer(object):
         return_code = rsync_proc.returncode
 
         rsync_log.close()
+        result_pass = False
+        # now, let's check the return code of the rsync process and see if it was an error.
+        if return_code != 0  and return_code != 24:
+            utils.print_err("Error: rsync returned '" + str(return_code) + "'")
+            utils.print_err("Error: marking worker as status 'error' for worker: " + worker.get_ip())
+            self.__master_data_lock.acquire()
+            worker.set_status("error")
+            self.__master_data_lock.release()
+            self.__sync_slots_used = self.__sync_slots_used - 1
+        else:
+
+            self.__master_data_lock.acquire()
+            worker.set_status("updated")
+
+            self.__sync_slots_used = self.__sync_slots_used - 1
+            if self.__sync_slots_used < 0:
+                self.__sync_slots_used = 0
+            worker.set_last_sync(time())
+            self.__master_data_lock.release()
+            os.remove(file_path)
+            result_pass = True
 
         # connect to the worker and tell it to close up the rsync channel.
         # create a new socket for the worker connection.
@@ -713,30 +734,9 @@ class MasterServer(object):
             return False
 
         sock2.close()
-
-        # now, let's check the return code of the rsync process and see if it was an error.
-        if return_code != 0  and return_code != 24:
-            utils.print_err("Error: rsync returned '" + str(return_code) + "'")
-            utils.print_err("Error: marking worker as status 'error' for worker: " + worker.get_ip())
-            self.__master_data_lock.acquire()
-            worker.set_status("error")
-            self.__master_data_lock.release()
-            self.__sync_slots_used = self.__sync_slots_used - 1
-            return False
-        else:
-
-            self.__master_data_lock.acquire()
-            worker.set_status("updated")
-
-            self.__sync_slots_used = self.__sync_slots_used - 1
-            if self.__sync_slots_used < 0:
-                self.__sync_slots_used = 0
-            worker.set_last_sync(time())
-            self.__master_data_lock.release()
-            os.remove(file_path)
-
         # once the sync is done, exit our self.
-        return True
+        return result_pass
+
 
     def _stale_purge_timer(self):
         self._do_stale_purge()
