@@ -371,9 +371,7 @@ class MasterServer(object):
                 recover=True
             else:
                 recover = False
-            # "sync recover" is a forcible reset of the syncing system.  So where we are forcibly
-            # resetting the internal syncing slot.
-            self.__sync_slots_used = 0;
+
             self._do_worker_syncs(recover)
             connection.sendall("ok\n")
         else:
@@ -447,8 +445,10 @@ class MasterServer(object):
             print "Worker Sync Started."
             # first invalidate all the workers.
             self.__master_data_lock.acquire()
+            # reset the internal syncing slot to make sure we can sync to the workers again.
+            self.__sync_slots_used = 0;
             for worker in self.workers:
-                if worker.get_status() == "updated":
+                if worker.get_status() == "updated" or worker.get_status() == "syncing":
                     worker.set_status("outdated")
                 if worker.get_status() == "error" and recover :
                     worker.set_status("outdated")
@@ -681,12 +681,12 @@ class MasterServer(object):
 
         # wait a couple of seconds for the worker to set up the sync
         sleep(5)
-
+        #print("Run Rsync")
         rsync_proc = subprocess.Popen(rsync_args, stdout=rsync_log, stderr=rsync_log)
-
+        #print("Call Communicate")
         # wait for the rsync to finish.
         rsync_proc.communicate()
-
+        #print("Grab Return Code")
         return_code = rsync_proc.returncode
 
         rsync_log.close()
