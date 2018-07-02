@@ -39,6 +39,7 @@ mkdir -p %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 cp -r dracut/99mprov/linuxrc %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 cp -r dracut/99mprov/module-setup.sh %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 cp -r dracut/99mprov/python-deps %{buildroot}/usr/lib/dracut/modules.d/99mprov/
+cp -r dracut/99-mprov.conf %{buildroot}/etc/dracut.conf.d/
 
 %post
 /usr/bin/systemctl daemon-reload
@@ -51,12 +52,16 @@ cp -r dracut/99mprov/python-deps %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 %{python2_sitelib}/mprov
 /usr/lib/systemd/system/*
 %config /etc/sysconfig/mprov
+%config /etc/dracut.conf.d/99-mprov.conf
 %attr(0700, root, root) /usr/sbin/mprovcmd
 /usr/lib/firewalld/services/mprov.xml
 /usr/lib/dracut/modules.d/99mprov
 
 
 %changelog
+* Mon Jul 02 2018 Jason Williams <jasonw@tulg.org>
+- Adding dracut config file to exclude mprov unless explicitly included.
+
 * Wed May 16 2018 Jason Williams <jasonw@tulg.org>
 - Lots of modifications for bugs
 - Added dracut module for including in initramfs
