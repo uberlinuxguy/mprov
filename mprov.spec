@@ -39,6 +39,7 @@ mkdir -p %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 cp -r dracut/99mprov/linuxrc %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 cp -r dracut/99mprov/module-setup.sh %{buildroot}/usr/lib/dracut/modules.d/99mprov/
 cp -r dracut/99mprov/python-deps %{buildroot}/usr/lib/dracut/modules.d/99mprov/
+mkdir -p %{buildroot}/etc/dracut.conf.d/
 cp -r dracut/99-mprov.conf %{buildroot}/etc/dracut.conf.d/
 
 %post
