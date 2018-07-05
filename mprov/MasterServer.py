@@ -96,6 +96,9 @@ class MasterServer(object):
                 except KeyboardInterrupt as kbd_int:
                     self.signal_handler(signal.SIGINT, None)
                     return
+                except socket.error as serr:
+                    sleep(1)
+
 
                 client.settimeout(60)
                 threading.Thread(name=address[0], target=self._handle_connection, args=(client, address)).start()
