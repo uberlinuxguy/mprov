@@ -21,6 +21,7 @@ class Client(object):
     __sync_thread = None  # type: threading.Thread
     __ctrl_thread = None  # type: threading.Thread
     __hb_timer = None  # type: threading.Timer
+    __thread_condition = threading.Condition(threading.Lock())
 
     def signal_handler(self, signum, frame):
         self.__exiting = True
@@ -69,17 +70,27 @@ class Client(object):
             utils.print_err("Error: " + e.message)
             return 1
 
+        # this lock will be released by _register_with_master() when syncing starts.
+        self.__thread_condition.acquire()
+
         # start the process with a call to register.
         # this sets up the timer functions and threads.
-        self._register_with_master()
+        print("Starting register thread.")
+        threading.Thread(name="reg_thread", target=self._register_with_master).start()
 
         # wait for the sync to start.
-        while not self.__syncing:
-            sleep(5)
+        print("Waiting for sync thread to start")
+        while self.__sync_thread is None:
+            print(".")
+            self.__thread_condition.wait()
 
-        # wait on the sync thread.
-        if self.__sync_thread is not None:
-            self.__sync_thread.join()
+        print("Waitin for sync to finish")
+        # wait for the sync thread to finish
+        while self.__sync_thread.isAlive():
+            print(".")
+            self.__thread_condition.wait()
+
+        self.__sync_thread.join()
 
         # wait on the control thread.
         if self.__ctrl_thread is not None:
@@ -92,76 +103,81 @@ class Client(object):
             return 1
 
     def _register_with_master(self):
-        if self.__exiting:
-            return
-
-        if self.__master_connection is None:
-            self.__master_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-            # master should reply in 30 seconds or so...
-            self.__master_connection.settimeout(30)
-            master_address = (self.__config.get_conf_val("ms"), 4017)
-            utils.print_err("Attempting to connect to master: " + master_address[0])
-            try:
-                self.__master_connection.connect(master_address)
-            except Exception as e:
-                utils.print_err("Error: Master Connection failed in _register_with_master(). ")
-                utils.print_err("Error: " + e.message)
-                self._restart_reg_timer()
+        with self.__thread_condition:
+            if self.__exiting:
+                self.__thread_condition.notify()
                 return
 
-        try:
-            cmd_send = "client client_uuid=" + self.__my_uuid + " image=" + self.__config.get_conf_val("image")
-            if self.__req_uuid != "":
-                cmd_send = cmd_send + " uuid=" + self.__req_uuid
-                cmd_send = cmd_send + " state=syncing"
-            else:
-                cmd_send = cmd_send + " state=syncing"
-            self.__master_connection.sendall(cmd_send)
+            if self.__master_connection is None:
+                self.__master_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-            packet = utils.parse_packet(self.__master_connection.recv(1024))  # type: dict
-            if packet is None:
-                utils.print_err("Error: Unable to parse packet.  Will retry")
-                self.__master_connection.close()
-                self.__master_connection = None
-
-            if "ok" not in packet:
-                if "err" in packet:
-                    utils.print_err("No worker found, waiting for more workers...")
-
-                else:
-                    utils.print_err("Error: Master Server responded poorly to our register request. Will retry.")
-                    utils.print_err("Error: Master Server Said: '" + packet["raw_packet"] + "'")
-                self.__master_connection.close()
-                self.__master_connection = None
-            else:
-                # print "Master replied ok to us."
-                self.__req_uuid = packet["uuid"]
-
-                worker_ip = packet["worker_ip"]
-                if worker_ip is None:
-                    # we don't have a worker.  So exit.
+                # master should reply in 30 seconds or so...
+                self.__master_connection.settimeout(30)
+                master_address = (self.__config.get_conf_val("ms"), 4017)
+                utils.print_err("Attempting to connect to master: " + master_address[0])
+                try:
+                    self.__master_connection.connect(master_address)
+                except Exception as e:
+                    utils.print_err("Error: Master Connection failed in _register_with_master(). ")
+                    utils.print_err("Error: " + e.message)
                     self._restart_reg_timer()
+                    self.__thread_condition.notify()
                     return
 
-                # thread off to connect to the worker and start the sync
-                # set out syncing flag, so we know below that we shouldn't try to spawn another thread.
-                if not self.__syncing:
-                    self.__syncing = True
-                    # now let's start the thread to talk to the worker.
-                    self.__sync_thread = threading.Thread(target=self._handle_sync, args=(worker_ip,))
-                    if self.__sync_thread is not None:
-                        self.__sync_thread.start()
+            try:
+                cmd_send = "client client_uuid=" + self.__my_uuid + " image=" + self.__config.get_conf_val("image")
+                if self.__req_uuid != "":
+                    cmd_send = cmd_send + " uuid=" + self.__req_uuid
+                    cmd_send = cmd_send + " state=syncing"
+                else:
+                    cmd_send = cmd_send + " state=syncing"
+                self.__master_connection.sendall(cmd_send)
 
-            # set this function up as a re-occuring timer based on the -b/--heartbeat option.
-            self._restart_reg_timer()
+                packet = utils.parse_packet(self.__master_connection.recv(1024))  # type: dict
+                if packet is None:
+                    utils.print_err("Error: Unable to parse packet.  Will retry")
+                    self.__master_connection.close()
+                    self.__master_connection = None
 
-        except Exception as e:
-            if self.__master_connection is not None:
-                self.__master_connection.close()
-            self.__master_connection = None
-            utils.print_err("Error: Problem communicating with master server. Will Retry")
-            self._restart_reg_timer()
+                if "ok" not in packet:
+                    if "err" in packet:
+                        utils.print_err("No worker found, waiting for more workers...")
+
+                    else:
+                        utils.print_err("Error: Master Server responded poorly to our register request. Will retry.")
+                        utils.print_err("Error: Master Server Said: '" + packet["raw_packet"] + "'")
+                    self.__master_connection.close()
+                    self.__master_connection = None
+                else:
+                    # print "Master replied ok to us."
+                    self.__req_uuid = packet["uuid"]
+
+                    worker_ip = packet["worker_ip"]
+                    if worker_ip is None:
+                        # we don't have a worker.  So exit.
+                        self._restart_reg_timer()
+                        self.__thread_condition.notify()
+                        return
+
+                    # thread off to connect to the worker and start the sync
+                    # set out syncing flag, so we know below that we shouldn't try to spawn another thread.
+                    if not self.__syncing:
+                        self.__syncing = True
+                        # now let's start the thread to talk to the worker.
+                        self.__sync_thread = threading.Thread(target=self._handle_sync, args=(worker_ip,))
+                        if self.__sync_thread is not None:
+                            self.__sync_thread.start()
+
+                # set this function up as a re-occuring timer based on the -b/--heartbeat option.
+                self._restart_reg_timer()
+            except Exception as e:
+                if self.__master_connection is not None:
+                    self.__master_connection.close()
+                self.__master_connection = None
+                utils.print_err("Error: Problem communicating with master server. Will Retry")
+                self._restart_reg_timer()
+            self.__thread_condition.notify()
+
 
     def _restart_reg_timer(self):
         self.__hb_timer = threading.Timer(self.__hb_timer_interval, self._register_with_master)
