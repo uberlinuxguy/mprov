@@ -22,6 +22,7 @@ class Client(object):
     __ctrl_thread = None  # type: threading.Thread
     __hb_timer = None  # type: threading.Timer
     __thread_condition = threading.Condition(threading.Lock())
+    __data_lock = threading.RLock()
 
     def signal_handler(self, signum, frame):
         self.__exiting = True
@@ -42,6 +43,9 @@ class Client(object):
         self.__hb_timer = None  # type: threading.Timer
         self.__req_uuid = ""
         self.__syncing = False
+        with self.__data_lock:
+            self.__state = "new"
+
         self.__req_image = config.get_conf_val("image")
         self.__master_connection = None  # type: socket.socket
 
@@ -67,46 +71,64 @@ class Client(object):
             self.__master_connection.connect(master_address)
         except Exception as e:
             utils.print_err("Error: Master Connection failed in run(). ")
-            utils.print_err("Error: " + e.message)
-            return 1
+            utils.print_err("Error: " + str(e))
 
-        # this lock will be released by _register_with_master() when syncing starts.
+
+        # this lock will be released by the wait() call below, letting the register thread start.
         self.__thread_condition.acquire()
 
         # start the process with a call to register.
         # this sets up the timer functions and threads.
-        print("Starting register thread.")
-        threading.Thread(name="reg_thread", target=self._register_with_master).start()
+        #print("Starting register thread.")
+        sys.stdout.flush()
+        self.__hb_timer = threading.Thread(name="reg_thread", target=self._register_with_master).start()
 
         # wait for the sync to start.
-        print("Waiting for sync thread to start")
+        #print("Waiting for sync thread to start")
+        sys.stdout.flush()
         while self.__sync_thread is None:
-            print(".")
+            #print(".")
+            sys.stdout.write(".")
+            sys.stdout.flush()
             self.__thread_condition.wait()
 
-        print("Waitin for sync to finish")
+        #print("Waiting for sync to finish")
+        sys.stdout.flush()
+
         # wait for the sync thread to finish
         while self.__sync_thread.isAlive():
-            print(".")
+            sys.stdout.write("^")
+            sys.stdout.flush()
+            self.__sync_thread.join(1)
             self.__thread_condition.wait()
 
-        self.__sync_thread.join()
+        self.__thread_condition.release()
+        # if we get here, tell the master we are done and cancel the timer.
+        self.__hb_timer.cancel()
+        #self._register_with_master()
+        print "Sync complete."
+        #print "Sync Thread Complete, waiting for control thread."
 
         # wait on the control thread.
         if self.__ctrl_thread is not None:
             self.__ctrl_thread.join()
+        #print "Control thread complete"
+
+        # wait on the hb timer.
+        #self.__thread_condition.acquire()
+        #self.__thread_condition.wait()
 
         # exit now and return the status.
         if self.__sync_result == "pass":
+            #print "Exit 0"
             return 0
         else:
+            #print "Exit 1"
             return 1
 
     def _register_with_master(self):
         with self.__thread_condition:
-            if self.__exiting:
-                self.__thread_condition.notify()
-                return
+
 
             if self.__master_connection is None:
                 self.__master_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -119,18 +141,21 @@ class Client(object):
                     self.__master_connection.connect(master_address)
                 except Exception as e:
                     utils.print_err("Error: Master Connection failed in _register_with_master(). ")
-                    utils.print_err("Error: " + e.message)
+                    utils.print_err("Error: " + str(e))
                     self._restart_reg_timer()
                     self.__thread_condition.notify()
                     return
 
             try:
+
                 cmd_send = "client client_uuid=" + self.__my_uuid + " image=" + self.__config.get_conf_val("image")
-                if self.__req_uuid != "":
-                    cmd_send = cmd_send + " uuid=" + self.__req_uuid
-                    cmd_send = cmd_send + " state=syncing"
-                else:
-                    cmd_send = cmd_send + " state=syncing"
+                with self.__data_lock:
+                    if self.__req_uuid != "":
+                        cmd_send = cmd_send + " uuid=" + self.__req_uuid
+                        cmd_send = cmd_send + " state=" + self.__state
+                    else:
+                        cmd_send = cmd_send + " state=" + self.__state
+                #print("Sending master: " + cmd_send)
                 self.__master_connection.sendall(cmd_send)
 
                 packet = utils.parse_packet(self.__master_connection.recv(1024))  # type: dict
@@ -138,7 +163,14 @@ class Client(object):
                     utils.print_err("Error: Unable to parse packet.  Will retry")
                     self.__master_connection.close()
                     self.__master_connection = None
-
+                print packet["raw_packet"]
+                with self.__data_lock:
+                    if self.__state == "done" or self.__state == "syncing":
+                        if self.__state == "syncing":
+                            self._restart_reg_timer()
+                        self.__thread_condition.notify()
+                        print "Sent state: " + self.__state
+                        return
                 if "ok" not in packet:
                     if "err" in packet:
                         utils.print_err("No worker found, waiting for more workers...")
@@ -149,6 +181,8 @@ class Client(object):
                     self.__master_connection.close()
                     self.__master_connection = None
                 else:
+
+
                     # print "Master replied ok to us."
                     self.__req_uuid = packet["uuid"]
 
@@ -161,8 +195,11 @@ class Client(object):
 
                     # thread off to connect to the worker and start the sync
                     # set out syncing flag, so we know below that we shouldn't try to spawn another thread.
-                    if not self.__syncing:
-                        self.__syncing = True
+
+                    if not self.__syncing and self.__state == "new":
+                        with self.__data_lock:
+                            self.__syncing = True
+                            self.__state = "syncing"
                         # now let's start the thread to talk to the worker.
                         self.__sync_thread = threading.Thread(target=self._handle_sync, args=(worker_ip,))
                         if self.__sync_thread is not None:
@@ -211,24 +248,33 @@ class Client(object):
             utils.print_err("Error: Exception in worker comms: " + e.message)
             self.__syncing = False
             self._cancel_rsync()
+            with self.__data_lock:
+                self.__state="new"
 
         if not control_connection_good:
+            with self.__data_lock:
+                self.__state = "new"
             self._cancel_rsync()
             sock.close()
-            return False
 
+            return False
+        #print "** CTRL THREAD STARTING LOOP"
         while self.__syncing:
             # if we get here we have a good connection, so let's make sure it doesn't go anywhere
             try:
+                #print("Recv")
                 sock.sendall("ok")
                 packet = utils.parse_packet(sock.recv(15))
                 if "ok" not in packet:
+                    #print "Exit, not ok"
                     self._cancel_rsync()
                     self.__syncing = False
                     sock.close()
                     return False
+                #print("Recvd")
             except Exception as e:
                 print e
+                #print "Exit, exception"
                 sock.close()
                 self._cancel_rsync()
                 self.__syncing = False
@@ -236,13 +282,14 @@ class Client(object):
             # utils.print_err("worker hb: " + str(time()))
             # small sleep to loosen the tight loop
             sleep(1)
-
+        #print "** Exit Loop"
         # we are no longer syncing, close everything down.
         sock.close()
 
         self._cancel_rsync()
         self.__syncing = False
-        return False
+        print("** CTRL THREAD END")
+        return
 
     def _handle_sync(self, worker_ip):
 
@@ -269,6 +316,8 @@ class Client(object):
                 sock.close()
                 self.__syncing = False
                 self.__retries += 1
+                with self.__data_lock:
+                    self.__state = "new"
                 return False
             if "ok" not in packet:
                 utils.print_err("Error: Worker replied badly.  Will retry.")
@@ -276,6 +325,8 @@ class Client(object):
                 sock.close()
                 self.__syncing = False
                 self.__retries += 1
+                with self.__data_lock:
+                    self.__state = "new"
                 return False
         except Exception as e:
             sock.close()
@@ -284,6 +335,8 @@ class Client(object):
             self.__retries += 1
             utils.print_err(("Error: Sending master worker IP: " + worker_ip))
             self._notify_master_error(worker_ip)
+            with self.__data_lock:
+                self.__state = "new"
             return False
 
         # worker is connected
@@ -346,55 +399,37 @@ class Client(object):
                         if res_packet['result'] == "error":
                             print "Worker Sync Failed! (Err: 101)"
                             self.__sync_result = 'error'
+                            self._cancel_rsync()
                         elif res_packet['result'] == "pass":
                             print "Worker Sync Complete"
                             self.__sync_result = 'pass'
                     else:
                         print "Worker Sync Failed! (Err: 102)"
                         self.__sync_result = 'error'
+                        self._cancel_rsync()
                 else:
                     print "Worker Sync Failed! (Err: 103)"
                     self.__sync_result = 'error'
+                    self._cancel_rsync()
             else:
                 print "Worker Sync Failed! (Err: 104)"
                 self.__sync_result = 'error'
+                self._cancel_rsync()
         except socket.timeout:
             utils.print_err("Error: worker control comms. timeout.")
             print "Worker Sync Failed! (Err: 105)"
             self.__sync_result = 'error'
+            self._cancel_rsync()
 
         sock.close()
 
-        if self.__master_connection is None:
-            self.__master_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-            # master should reply in 30 seconds or so...
-            self.__master_connection.settimeout(30)
-            master_address = (self.__config.get_conf_val("ms"), 4017)
-
-            try:
-                self.__master_connection.connect(master_address)
-
-            except Exception as e:
-                utils.print_err("Error: Master Connection failed in _handle_sync() ")
-                utils.print_err("Error: " + e.message)
-
-        if self.__master_connection is not None:
-            cmd_send = "client client_uuid=" + self.__my_uuid + \
-                       " image=" + self.__config.get_conf_val("image")
-            if self.__req_uuid != "":
-                cmd_send = cmd_send + " uuid=" + self.__req_uuid
-            cmd_send = cmd_send + " state=done"
-
-            utils.print_err("Sending to master: " + cmd_send)
-            self.__master_connection.sendall(cmd_send)
-            utils.print_err(self.__master_connection.recv(1024))
-        else:
-            utils.print_err("Error: Unable to notify master.")
-            utils.print_err("Error: Stale connection likely present on master.")
+        # set the state to done and let the register function handle letting the master know.
+        with self.__data_lock:
+            self.__state = "done"
 
         self.__syncing = False
         self.__exiting = True
+        print "Exit Worker Thread"
 
     def _cancel_rsync(self):
         # cancel the rsync.
@@ -418,21 +453,18 @@ class Client(object):
 
             except Exception as e:
                 utils.print_err("Error: Master Connection failed in _notify_master_error() ")
-                utils.print_err("Error: " + e.message)
-
+                utils.print_err("Error: " + str(e))
+        with self.__data_lock:
+            self.__state = "new"
         if self.__master_connection is not None:
             cmd_send = "client client_uuid=" + self.__my_uuid + " image=" + self.__config.get_conf_val("image")
             if self.__req_uuid != "":
                 cmd_send = cmd_send + " uuid=" + self.__req_uuid
-            cmd_send = cmd_send + " state=syncing worker_ip="
+            with self.__data_lock:
+                cmd_send = cmd_send + " state=" + self.__state + " worker_ip="
             cmd_send = cmd_send +  worker_ip + " worker_state=error"
 
-            #cmd_send = "client client_uuid=" + self.__my_uuid + \
-            #           " image=" + self.__config.get_conf_val("image")
-            #if self.__req_uuid != "":
-            #    cmd_send = cmd_send + " uuid=" + self.__req_uuid
-            #cmd_send = cmd_send + " state=done"
-            utils.print_err("Sending to master: " + cmd_send)
+            #utils.print_err("Sending to master: " + cmd_send)
             self.__master_connection.sendall(cmd_send)
             self.__master_connection.recv(1024)
         else:
