@@ -93,6 +93,9 @@ class MasterServer(object):
             #if threading.active_count() < 500 :
                 try:
                     client, address = self.sock.accept()
+                    client.settimeout(60)
+                    threading.Thread(name=address[0], target=self._handle_connection, args=(client, address)).start()
+
                 except KeyboardInterrupt as kbd_int:
                     self.signal_handler(signal.SIGINT, None)
                     return
@@ -100,8 +103,6 @@ class MasterServer(object):
                     sleep(1)
 
 
-                client.settimeout(60)
-                threading.Thread(name=address[0], target=self._handle_connection, args=(client, address)).start()
             #else:
             #    # need to sleep for a few seconds here to make sure we aren't in a tight loop.
             #    sleep(10)
@@ -225,31 +226,25 @@ class MasterServer(object):
         """
         client_obj = MasterServerClientRequest(data + " ip=" + address[0])  # type: MasterServerClientRequest
 
+        with self.__master_data_lock:
+            # look for this client_request already in the list, and just update it's hb entry.
+            for m_client in self.client_requests:  # type: MasterServerClientRequest
+                if client_obj.get_uuid() == m_client.get_uuid():
+                    m_client.set_last_hb(time())
+                    tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())
+                    if tmp_worker is None:
+                        utils.print_err("Error: unable to get worker by uuid for client. Worker UUID: " +
+                                        m_client.get_worker_uuid())
+                        utils.print_err("Error: Purging client.")
+                        self.client_requests.remove(m_client)
 
-        # look for this client_request already in the list, and just update it's hb entry.
-        for m_client in self.client_requests:  # type: MasterServerClientRequest
-            if client_obj.get_uuid() == m_client.get_uuid():
-                self.__master_data_lock.acquire()
-                m_client.set_last_hb(time())
-                self.__master_data_lock.release()
-                tmp_worker = self._find_worker_by_uuid(m_client.get_worker_uuid())
-                if tmp_worker is None:
-                    utils.print_err("Error: unable to get worker by uuid for client. Worker UUID: " +
-                                    m_client.get_worker_uuid())
-                    utils.print_err("Error: Purging client.")
-                    self.__master_data_lock.acquire()
-                    self.client_requests.remove(m_client)
-                    self.__master_data_lock.release()
-
-                if client_obj.get_done() == "done":
-                    self.__master_data_lock.acquire()
-                    tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
-                    #utils.print_err("Client: " + m_client.get_ip() + " complete. Removing request " + m_client.get_uuid())
-                    self.client_requests.remove(m_client)
-                    self.__master_data_lock.release()
-                connection.sendall("ok uuid=" + client_obj.get_uuid() +
-                                   " worker_ip=" + tmp_worker.get_ip())
-                return
+                    if client_obj.get_done() == "done":
+                        tmp_worker.set_slots_in_use(tmp_worker.get_slots_in_use()-1)
+                        #utils.print_err("Client: " + m_client.get_ip() + " complete. Removing request " + m_client.get_uuid())
+                        self.client_requests.remove(m_client)
+                    connection.sendall("ok uuid=" + client_obj.get_uuid() +
+                                       " worker_ip=" + tmp_worker.get_ip())
+                    return
 
         #
         # look up the least used worker and send the client there.
