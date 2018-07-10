@@ -586,6 +586,7 @@ class WorkerServer(object):
 
         # if we exit the loop, it's time to turn things down.
         connection.sendall("close")
+        connection.close()
         # Clean up the request and remove it.
         self._cleanup_client_req(req_uuid)
         return False
