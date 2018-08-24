@@ -3,7 +3,7 @@
 if [ "$1" == "-v" ]
 then
     # echo the version
-    cat -s mprov-version <(echo -n "-")  mprov-release | tr -d "\n"
+    cat -s mprov-version <(echo -n "-")  mprov-release
     exit 0
 fi
 
